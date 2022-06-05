@@ -7,6 +7,7 @@
 # Versión actual: 0.1
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from typing import Optional
@@ -285,7 +286,11 @@ class Barra2F:
             else:  # 3D
                 # Cosenos directores del eje local z
                 z = np.cross(ix, IY)  # Kassimalli (8.59)
-                iz = z / np.linalg.norm(z)  # Kassimalli (8.60)
+                nz = np.linalg.norm(z) # Norma de z
+                if nz > 0.0: # Si ix no es paralelo IY
+                    iz = z / nz  # Kassimalli (8.60)
+                else:
+                    iz = IZ # Kassimalli p477 2do párrafo.
 
                 # Cosenos directores del eje local y
                 iy = np.cross(iz, ix)  # Kassimalli (8.61)
@@ -1047,7 +1052,42 @@ def mostrar_resultados(resultados):
 
 
 def main():
-    return
+    puntos_pilar = pd.read_csv('nudos_pilar.csv')
+    barras_pilar = pd.read_csv('barras_pilar.csv')
+    ps = puntos_pilar.to_numpy()
+    bs = barras_pilar.to_numpy()
+    coordenadas = {}
+    for i, p in enumerate(ps):
+        coordenadas[i] = tuple(p)
+    
+    # Nº de nudo y restricciones en X, Y, Z
+    restr = {1: (1, 1, 1), 2: (1, 1, 1), 3: (1, 1, 1), 4: (1, 1, 1)}
+    cargas = {49: (0, -400e3, 0), 83:(800e3, -400e3, 0)} # No está correcto aún
+    
+    freq = 15.0 # (Hz) Frecuencia de vibración de las cargas (solo viento)
+    m1 = Material(7850, 200e9) # material
+    
+    ## Secciones transversales
+    s1 = SeccionTransversal(2550*1e-6/2) # Cordón superior e inferior
+    s2 = SeccionTransversal(4936.8*1e-6/2) # Cordones zona de refuerzo y pilar
+    s3 = SeccionTransversal(693.6*1e-6/2) # Diagonal vigas
+    s4 = SeccionTransversal(940.44*1e-6/2) # Diagonal vigas zona de refuerzo
+    s5 = SeccionTransversal(7486.8*1e-6/2) # Vertical conexión zona de refuerzo
+    s6 = SeccionTransversal(1270*1e-6) # Planchuela horizontal
+    s7 = SeccionTransversal(1270*1e-6) # Planchuela diagonal
+
+    secciones = [s1, s2, s3, s4, s5, s6, s7]
+    
+    elementos = []
+    for i, b in enumerate(bs):
+        Ni, Nf, m, s = tuple(b)
+        elementos.append([Ni, Nf, m1, secciones[s-1]])
+        
+    mps = 10
+    resultados = procesamiento(coordenadas, restr, cargas, elementos, freq,
+                                   lapso=10, mps=mps, tipo_analisis='dinamico')
+    
+    mostrar_resultados(resultados)
 
 
 if __name__ == "__main__":
