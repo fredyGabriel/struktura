@@ -248,16 +248,22 @@ class Material:
     elast_long: float = 200e9  # Módulo de elasticidad longitudinal (Young)
     densidad: float = 7850.0  # Densidad del material
     poisson: Optional[float] = None  # Módulo de Poisson
+    _elast_transv: Optional[float] = None  # Módulo de cizalladura
+
+    def __post_init__(self):
+        if self.poisson is not None:
+            E = self.elast_long
+            nu = self.poisson
+            self._elast_transv = E / 2 / (1 + nu)
 
     @property
     def elast_transv(self) -> float:
         """Módulo de cizalladura (G)."""
-        E = self.elast_long
-        nu = self.poisson
-        if nu is not None:
-            return E / 2 / (1 + nu)
-        else:
-            raise AttributeError("Coeficiente de Poisson desconocido")
+        return self._elast_transv
+
+    @elast_transv.setter
+    def elast_transv(self, ge):
+        self._elast_transv = ge
 
     @property
     def lame1(self) -> float:
@@ -305,18 +311,25 @@ class Seccion:
     area: float  # Área de la sección transversal
     inercia_y: Optional[float] = None  # Inercia alrededor del eje y
     inercia_z: Optional[float] = None  # Inercia alrededor del eje z
+    _inercia_polar: Optional[float] = None  # Inercia polar, Ix
     area_cortante_y: Optional[float] = None  # Área efectiva a cortante en y
     area_cortante_z: Optional[float] = None  # Área efectiva a cortante en z
+
+    def __post_init__(self):
+        Iy = self.inercia_y
+        Iz = self.inercia_z
+        if Iy is not None:
+            if Iz is not None:
+                self._inercia_polar = Iy + Iz
 
     @property
     def inercia_polar(self) -> float:
         """Momento polar de inercia."""
-        Iy = self.inercia_y
-        Iz = self.inercia_z
+        return self._inercia_polar
 
-        assert Iy is not None or Iz is not None, "Faltan datos de inercia"
-
-        return Iy + Iz
+    @inercia_polar.setter
+    def inercia_polar(self, jota: float):
+        self._inercia_polar = jota
 
 
 #############################
@@ -460,7 +473,7 @@ class Barra(ABC):
     def desplaz_local(self) -> np.ndarray:
         """Vector de desplazamientos nodales de la barra en coord. locales."""
         U = self.desplaz_global()
-        T = self.transf_coord
+        T = self.transf_coord()
         return T @ U
 
     def fuerza_local(self) -> np.ndarray:
@@ -838,20 +851,10 @@ class BarraPortico(Barra):
     def masa_local(self) -> np.ndarray:
         """Matriz de masas en coordenadas locales.
 
-        Para el caso 2D:
-            Si se da el valor de G (módulo de corte), se considerarán las
-        deformaciones a cortante. Si G no es dado, no se considerará el aporte
-        de las deformaciones a cortante. Notar que si G es dado, también deben
-        darse los valores de E, I y Ac.
-
-        Si la inercia Iz es dada, se considerará la inercia rotacional. Si Iz
-        no es dada, se despreciará la inercia rotacional.
-
-        Para el caso 3D:
             No se considera el efecto de las deformaciones por cortante.
 
         Returns:
-            2D: Matriz 4x4; 3D: Matriz 12x12
+            2D: Matriz 6x6; 3D: Matriz 12x12
         """
 
         dim = self.dim
@@ -861,47 +864,15 @@ class BarraPortico(Barra):
         rho = self.material.densidad
 
         if dim == 2:  # Barra de pórtico plano
-            E = self.material.elast_long
-            G = self.material.elast_transv
-            Ac = self.seccion.area_cortante_y
-
-            if Iz is None:  # No se considera la inercia rotacional
-                Iz = 0
-
-            if G is None:  # No se considera el efecto de las cortantes
-                fs = 0.0
-            else:  # Se considera el efecto de la cortante
-                assert E is not None or Ac is not None, "Revisa los datos"
-                fs = 12*E*Iz/(G*Ac*L**2)
-
-            # Inercia translacional
-            m1 = rho*A*L/(1 + fs)**2*np.array([
-                [13/35 + 7/10*fs + 1/3*fs**2, (11/210 + 11/120*fs +
-                 1/24*fs**2)*L, 9/70 + 3/10*fs + 1/6*fs**2, -(13/420 + 3/40*fs
-                 + 1/24*fs**2)*L],
-                [(11/210 + 11/120*fs + 1/24*fs**2)*L, (1/105 + 1/60*fs +
-                 1/120*fs**2)*L**2, (13/420 + 3/40*fs + 1/24*fs**2)*L,
-                 -(1/140 + 1/60*fs + 1/120*fs**2)*L**2],
-                [9/70 + 3/10*fs + 1/6*fs**2, (13/420 + 3/40*fs + 1/24*fs**2)*L,
-                 13/35 + 7/10*fs + 1/3*fs**2, -(11/210 + 11/120*fs +
-                                                1/24*fs**2)*L],
-                [-(13/420 + 3/40*fs + 1/24*fs**2)*L,
-                 -(1/140 + 1/60*fs + 1/120*fs**2)*L**2,
-                 -(11/210 + 11/120*fs + 1/24*fs**2)*L,
-                 (1/105 + 1/60*fs + 1/120*fs**2)*L**2]
+            m = rho*A*L/420 * np.array([
+                [140, 0, 0, 70, 0, 0],
+                [0, 156, 22*L, 0, 54, -13*L],
+                [0, 22*L, 4*L**2, 0, 13*L, -3*L**2],
+                [70, 0, 0, 140, 0, 0],
+                [0, 54, 13*L, 0, 156, -22*L],
+                [0, -13*L, -3*L**2, 0, -22*L, 4*L**2]
             ])
-
-            # Inercia rotacional
-            m2 = rho*A*L/(1 + fs)**2*Iz/A/L**2*np.array([
-                [6/5, (1/10 - 1/2*fs)*L, -6/5, (1/10 - 1/2*fs)*L],
-                [(1/10 - 1/2*fs)*L, (2/15 + 1/6*fs + 1/3*fs**2)*L**2,
-                 (-1/10 + 1/2*fs)*L, (-1/30 - 1/6*fs + 1/6*fs**2)*L**2],
-                [-6/5, (-1/10 + 1/2*fs)*L, 6/5, (-1/30 - 1/6*fs +
-                                                 1/6*fs**2)*L**2],
-                [(1/10 - 1/2*fs)*L, (-1/30 - 1/6*fs + 1/6*fs**2)*L**2,
-                 (-1/10 + 1/2*fs)*L, (2/15 + 1/6*fs + 1/3*fs**2)*L**2]
-            ])
-            return m1 + m2
+            return m
 
         elif dim == 3:
             Jx = self.seccion.inercia_polar
@@ -949,11 +920,11 @@ class BarraPortico(Barra):
         Iz = self.seccion.inercia_z
         G = self.material.elast_transv
         Ac = self.seccion.area_cortante_y
-        if self.cortante:  # No se considera la rigidez al corte
-            f = 0
-        else:  # Se toma en cuenta la rigidez al corte
+        if self.cortante:  # Se considera la rigidez al corte
             assert Ac is not None, "Falta dato de área efectiva al corte"
             f = 12*E*Iz/(G*Ac*L**2)
+        else:  # No se toma en cuenta la rigidez al corte
+            f = 0
 
         k = E*Iz/(L**3*(1 + f)) * np.array([
             [A*L**2/Iz, 0, 0, -A*L**2/Iz, 0, 0],
@@ -978,15 +949,15 @@ class BarraPortico(Barra):
         E = self.material.elast_long
         A = self.seccion.area
         [Iy, Iz] = self.seccion.inercia_y, self.seccion.inercia_z
+        J = self.seccion.inercia_polar
         G = self.material.elast_transv
         [Acy, Acz] = self.seccion.area_cortante_y, self.seccion.area_cortante_z
 
-        J = Iy + Iz
-        if self.cortante:  # No se considera la rigidez al corte
-            fy, fz = 0, 0
-        else:  # Se toma en cuenta la rigidez al corte
+        if self.cortante:  # Se toma en cuenta la rigidez al corte
             fy = 12*E*Iz/(G*Acy*L**2)
             fz = 12*E*Iy/(G*Acz*L**2)
+        else:  # No se considera la rigidez al corte
+            fy, fz = 0, 0
 
         k = np.array([
             [E*A/L, 0, 0, 0, 0, 0, -E*A/L, 0, 0, 0, 0, 0],
@@ -1099,7 +1070,7 @@ class BarraPortico(Barra):
         T = np.identity(ngdl)  # Inicialización
         if dim == 2:
             T[:2, :2] = m
-            T[3:, 3:] = m
+            T[3:5, 3:5] = m
             return T  # Notar que hay un uno en T[2,2] y T[5,5]
 
         elif dim == 3:
@@ -1195,8 +1166,61 @@ class BarraViga(BarraPortico):
 
     @property  # Sobreescrito
     def masa_local(self) -> np.ndarray:
-        # Falta implementar
-        return np.identity(4)
+        """Matriz de masa local de la viga.
+
+            Viga de Euler-Bernoulli o Timoshenko según el parámetro 'cortante'
+        de la estructura.
+
+        Si la inercia Iz es dada, se considerará la inercia rotacional. Si Iz
+        no es dada, se despreciará la inercia rotacional.
+
+        :return: Matriz 4x4
+        """
+        L = self.longitud
+        rho = self.material.densidad
+        E = self.material.elast_long
+        G = self.material.elast_transv
+        A = self.seccion.area
+        Iz = self.seccion.inercia_z
+        Ac = self.seccion.area_cortante_y
+
+        if Iz is None:  # No se considera la inercia rotacional
+            Iz = 0
+
+        if self.cortante:  # Se considera el efecto de las cortantes
+            assert E is not None or Ac is not None, "Revisa los datos"
+            fs = 12*E*Iz/(G*Ac*L**2)
+        else:  # No se considera el efecto de la cortante
+            fs = 0.0
+
+        # Inercia translacional
+        m1 = rho*A*L/(1 + fs)**2*np.array([
+            [13/35 + 7/10*fs + 1/3*fs**2, (11/210 + 11/120*fs + 1/24*fs**2)*L,
+             9/70 + 3/10*fs + 1/6*fs**2, -(13/420 + 3/40*fs + 1/24*fs**2)*L],
+            [(11/210 + 11/120*fs + 1/24*fs**2)*L, (1/105 + 1/60*fs +
+                                                   1/120*fs**2)*L**2,
+             (13/420 + 3/40*fs + 1/24*fs**2)*L, -(1/140 + 1/60*fs +
+                                                  1/120*fs**2)*L**2],
+            [9/70 + 3/10*fs + 1/6*fs**2, (13/420 + 3/40*fs + 1/24*fs**2)*L,
+             13/35 + 7/10*fs + 1/3*fs**2, -(11/210 + 11/120*fs +
+                                            1/24*fs**2)*L],
+            [-(13/420 + 3/40*fs + 1/24*fs**2)*L,
+             -(1/140 + 1/60*fs + 1/120*fs**2)*L**2,
+             -(11/210 + 11/120*fs + 1/24*fs**2)*L,
+             (1/105 + 1/60*fs + 1/120*fs**2)*L**2]
+        ])
+
+        # Inercia rotacional
+        m2 = rho*A*L/(1 + fs)**2*Iz/A/L**2*np.array([
+            [6/5, (1/10 - 1/2*fs)*L, -6/5, (1/10 - 1/2*fs)*L],
+            [(1/10 - 1/2*fs)*L, (2/15 + 1/6*fs + 1/3*fs**2)*L**2,
+             (-1/10 + 1/2*fs)*L, (-1/30 - 1/6*fs + 1/6*fs**2)*L**2],
+            [-6/5, (-1/10 + 1/2*fs)*L, 6/5, (-1/30 - 1/6*fs +
+                                             1/6*fs**2)*L**2],
+            [(1/10 - 1/2*fs)*L, (-1/30 - 1/6*fs + 1/6*fs**2)*L**2,
+             (-1/10 + 1/2*fs)*L, (2/15 + 1/6*fs + 1/3*fs**2)*L**2]
+        ])
+        return m1 + m2
 
     @property  # Sobreescrito
     def rigidez_local(self) -> np.ndarray:
@@ -1777,6 +1801,26 @@ class Viga(Estructura):
 
 @dataclass
 class Portico(Estructura):
+    """Estructura tipo pórtico 2D o 3D.
+
+    :param tipo (int): tipo de estructura según se define en TIPO_ESTRUCTURA
+    :param coords (dict): Coordenadas de los nudos.
+        Tiene la forma: {1:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
+            1D: X
+            2D: (X, Y)
+            3D: (X, Y, Z)
+            Las coordenadas deben expresarse en el sistema global adoptado
+            aunque no sea el tradicional: X: horizontal; Y: vertical;
+            Z: saliente.
+    :param restricciones (dict): Nudos restringidos y sus restricciones según
+        se define en la clase Nudo.
+    :param cargas_nodales (dict): cargas nodales
+    :param elementos (list): lista con datos de las barras para configurar los
+        instancias de la clase Barra.
+    :param cortante (bool): Considerar o no la rigidez a cortante.
+     """
+
+    cortante: bool = False  # Considerar o no la rigidez a cortante.
 
     def __post_init__(self):
         """Define el tipo de estructura."""
@@ -1784,9 +1828,28 @@ class Portico(Estructura):
         self._tipo = 3 if dim == 2 else 6
 
     def config(self):
-        """AÚN NO IMPLEMENTADO"""
+        """Configuración de nudos y barras."""
         self.config_nudos()  # Configuración de nudos
-        nudos = self.nudos()
+        nudos = self.nudos()  # Lista de nudos del tipo Nudo
+        versores = self.versores  # Versores del sistema de coord. global
+        Q = self.cortante  # Consideración de la rigidez a cortante
+
+        # Configuración de las barras
+        elementos = self.elementos  # Obtenido del preprocesamiento
+        bs = []  # Inicialización de la lista de barras
+
+        for e in elementos:
+            ni = e[0] - 1  # Índice del nudo inicial
+            nf = e[1] - 1  # Índice del nudo final
+            if len(e) == 4:  # Si no se da el roll
+                bs.append(BarraPortico(self.tipo, nudos[ni], nudos[nf], e[2],
+                                       e[3], versores, cortante=Q))
+            else:  # Si roll es distinto de cero.
+                r = e[4]/180*np.pi  # Conversión a radianes
+                bs.append(BarraPortico(self.tipo, nudos[ni], nudos[nf], e[2],
+                                       e[3], versores, r, cortante=Q))
+
+        self._barras = bs  # Guarda la lista de barras
         return nudos
 
 
@@ -1807,29 +1870,6 @@ class Grilla(Estructura):
 ######################
 # Funciones globales #
 ######################
-
-def norm_uno(modos):
-    """Normaliza autovectores tal que la componente máx/mín sea igual a +1/-1.
-
-    Args:
-        modos: matriz de vectores característicos
-
-    Returns:
-        Matriz con filas de vectores propios normalizados con este criterio.
-    """
-    # Que cada autovector tenga su máxima componente igual a 1
-    max_abs = np.abs(np.max(modos, axis=0))  # Valores absolutos de máximos
-    min_abs = np.abs(np.min(modos, axis=0))  # Valores absolutos de mínimos
-    comp = np.array(max_abs > min_abs)  # comparación de valores absolutos
-
-    S = modos.T * 0  # Modos normalizados en las filas
-    for i, v in enumerate(modos.T):
-        if comp[i]:
-            S[i] = v / max_abs[i]
-        else:
-            S[i] = v / min_abs[i]
-    return S.T
-
 
 def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
     """Preprocesamiento. Preparación de datos para la clase Estructura.
@@ -1877,10 +1917,40 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
 
     elementos = []
     for i, b in enumerate(bnp):
-        Ni, Nf, m, s = tuple(b)
-        elementos.append([Ni, Nf, materiales[m-1], secciones[s-1]])
+        c = len(b)
+        if c == 4:  # Si no se da el roll (pórticos) o no importa (reticulados)
+            Ni, Nf, m, s = tuple(b)
+            elementos.append([Ni, Nf, materiales[m-1], secciones[s-1]])
+        elif c == 5:  # Si se da el dato de roll
+            Ni, Nf, m, s, r = tuple(b)
+            elementos.append([Ni, Nf, materiales[m-1], secciones[s-1], r])
+        else:
+            raise ValueError('Verificar datos de barras.')
 
     return coordenadas, elementos
+
+
+def norm_uno(modos):
+    """Normaliza autovectores tal que la componente máx/mín sea igual a +1/-1.
+
+    Args:
+        modos: matriz de vectores característicos
+
+    Returns:
+        Matriz con filas de vectores propios normalizados con este criterio.
+    """
+    # Que cada autovector tenga su máxima componente igual a 1
+    max_abs = np.abs(np.max(modos, axis=0))  # Valores absolutos de máximos
+    min_abs = np.abs(np.min(modos, axis=0))  # Valores absolutos de mínimos
+    comp = np.array(max_abs > min_abs)  # comparación de valores absolutos
+
+    S = modos.T * 0  # Modos normalizados en las filas
+    for i, v in enumerate(modos.T):
+        if comp[i]:
+            S[i] = v / max_abs[i]
+        else:
+            S[i] = v / min_abs[i]
+    return S.T
 
 
 # def desplaz_t(phi_p: np.ndarray, wf: float, wn: np.ndarray, modos:np.ndarray,
@@ -2182,5 +2252,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-#%%
