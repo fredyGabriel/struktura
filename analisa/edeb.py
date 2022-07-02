@@ -77,6 +77,7 @@ VERSORES = np.array([
 ])
 
 
+#%%
 @dataclass
 class Nudo:
     """Nudo de estructura de barras
@@ -311,25 +312,9 @@ class Seccion:
     area: float  # Área de la sección transversal
     inercia_y: Optional[float] = None  # Inercia alrededor del eje y
     inercia_z: Optional[float] = None  # Inercia alrededor del eje z
-    _inercia_polar: Optional[float] = None  # Inercia polar, Ix
+    modulo_torsion: Optional[float] = None  # Módulo de torsión
     area_cortante_y: Optional[float] = None  # Área efectiva a cortante en y
     area_cortante_z: Optional[float] = None  # Área efectiva a cortante en z
-
-    def __post_init__(self):
-        Iy = self.inercia_y
-        Iz = self.inercia_z
-        if Iy is not None:
-            if Iz is not None:
-                self._inercia_polar = Iy + Iz
-
-    @property
-    def inercia_polar(self) -> float:
-        """Momento polar de inercia."""
-        return self._inercia_polar
-
-    @inercia_polar.setter
-    def inercia_polar(self, jota: float):
-        self._inercia_polar = jota
 
 
 #############################
@@ -762,6 +747,7 @@ class BarraReticulado(Barra):
             plt.plot(X, Y, color=c, linewidth=lw, **kwargs)
 
         elif self.dim == 3:
+            assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=c, linewidth=lw, **kwargs)
 
@@ -802,6 +788,7 @@ class BarraReticulado(Barra):
             plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
 
         if self.dim == 3:
+            assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
 
@@ -875,7 +862,7 @@ class BarraPortico(Barra):
             return m
 
         elif dim == 3:
-            Jx = self.seccion.inercia_polar
+            Jx = self.seccion.modulo_torsion
             Iy = self.seccion.inercia_y
 
             m = rho*A*L*np.array([
@@ -919,20 +906,24 @@ class BarraPortico(Barra):
         A = self.seccion.area
         Iz = self.seccion.inercia_z
         G = self.material.elast_transv
-        Ac = self.seccion.area_cortante_y
+        Acy = self.seccion.area_cortante_y
         if self.cortante:  # Se considera la rigidez al corte
-            assert Ac is not None, "Falta dato de área efectiva al corte"
-            f = 12*E*Iz/(G*Ac*L**2)
+            assert Acy is not None, "Falta dato de área efectiva al corte"
+            fy = 12*E*Iz/(G*Acy*L**2)
         else:  # No se toma en cuenta la rigidez al corte
-            f = 0
+            fy = 0
 
-        k = E*Iz/(L**3*(1 + f)) * np.array([
-            [A*L**2/Iz, 0, 0, -A*L**2/Iz, 0, 0],
-            [0, 12, 6*L, 0, -12, 6*L],
-            [0, 6*L, (4 + f)*L**2, 0, -6*L, (2 - f)*L**2],
-            [-A*L**2/Iz, 0, 0, A*L**2/Iz, 0, 0],
-            [0, -12, -6*L, 0, 12, -6*L],
-            [0, 6*L, (2 - f)*L**2, 0, -6*L, (4 + f)*L**2]
+        k = np.array([
+            [E*A/L, 0, 0, -E*A/L, 0, 0],
+            [0, 12*E*Iz/L**3/(1+fy), 6*E*Iz/L**2/(1+fy), 0,
+             -12*E*Iz/L**3/(1+fy), 6*E*Iz/L**2/(1+fy)],
+            [0, 6*E*Iz/L**2/(1+fy), (4+fy)*E*Iz/L/(1+fy), 0,
+             -6*E*Iz/L**2/(1+fy), (2-fy)*E*Iz/L/(1+fy)],
+            [-E*A/L, 0, 0, E*A/L, 0, 0],
+            [0, -12*E*Iz/L**3/(1+fy), -6*E*Iz/L**2/(1+fy), 0,
+             12*E*Iz/L**3/(1+fy), -6*E*Iz/L**2/(1+fy)],
+            [0, 6*E*Iz/L**2/(1+fy), (2-fy)*E*Iz/L/(1+fy), 0,
+             -6*E*Iz/L**2/(1+fy), (4+fy)*E*Iz/L/(1+fy)]
         ])
         return k
 
@@ -949,7 +940,7 @@ class BarraPortico(Barra):
         E = self.material.elast_long
         A = self.seccion.area
         [Iy, Iz] = self.seccion.inercia_y, self.seccion.inercia_z
-        J = self.seccion.inercia_polar
+        J = self.seccion.modulo_torsion
         G = self.material.elast_transv
         [Acy, Acz] = self.seccion.area_cortante_y, self.seccion.area_cortante_z
 
@@ -961,26 +952,25 @@ class BarraPortico(Barra):
 
         k = np.array([
             [E*A/L, 0, 0, 0, 0, 0, -E*A/L, 0, 0, 0, 0, 0],
-            [0, 12*E*Iz, 0, 0, 0, 6*E*Iz/L**2/(1 + fy), 0, -12*E*Iz/L**3/(1 +
-                                                                          fy),
-             0, 0, 0, 6*E*Iz/L**2/(1 + fy)],
-            [0, 0, 12*E*Iy/L**3/(1 + fz), 0, -6*E*Iy/L**2/(1 + fz), 0, 0, 0,
-             -12*E*Iy/L**3/(1 + fy), 0, -6*E*Iy/L**2/(1 + fz), 0],
+            [0, 12*E*Iz/(L**3*(1+fy)), 0, 0, 0, 6*E*Iz/L**2/(1+fy), 0,
+             -12*E*Iz/L**3/(1+fy), 0, 0, 0, 6*E*Iz/L**2/(1+fy)],
+            [0, 0, 12*E*Iy/L**3/(1+fz), 0, -6*E*Iy/L**2/(1+fz), 0, 0, 0,
+             -12*E*Iy/L**3/(1+fz), 0, -6*E*Iy/L**2/(1+fz), 0],
             [0, 0, 0, G*J/L, 0, 0, 0, 0, 0, -G*J/L, 0, 0],
-            [0, 0, -6*E*Iy/L**2/(1 + fz), 0, (4 + fz)*E*Iy/L/(1 + fz), 0, 0, 0,
-             6*E*Iy/L**2/(1 + fz), 0, (2 - fz)*E*Iy/L/(1 + fz), 0],
-            [0, 6*E*Iy/L**2/(1 + fz), 0, 0, 0, (4 + fy)*E*Iz/L/(1 + fy), 0,
-             -6*E*Iz/L**2/(1 + fy), 0, 0, 0, (2 - fy)*E*Iz/L/(1 + fy)],
+            [0, 0, -6*E*Iy/L**2/(1+fz), 0, (4+fz)*E*Iy/L/(1+fz), 0, 0, 0,
+             6*E*Iy/L**2/(1+fz), 0, (2-fz)*E*Iy/L/(1+fz), 0],
+            [0, 6*E*Iz/L**2/(1+fy), 0, 0, 0, (4+fy)*E*Iz/L/(1+fy), 0,
+             -6*E*Iz/L**2/(1+fy), 0, 0, 0, (2-fy)*E*Iz/L/(1+fy)],
             [-E*A/L, 0, 0, 0, 0, 0, E*A/L, 0, 0, 0, 0, 0],
-            [0, -12*E*Iz/L**3/(1 + fy), 0, 0, 0, -6*E*Iz/L**2/(1 + fy), 0,
-             12*E*Iz/L**3/(1 + fy), 0, 0, 0, -6*E*Iz/L**2/(1 + fy)],
-            [0, 0, -12*E*Iy/L**3/(1 + fz), 0, 6*E*Iy/L**2/(1 + fz), 0, 0, 0,
-             12*E*Iy/L**3/(1 + fz), 0, 6*E*Iy/L**2/(1 + fz), 0],
-            [0, 0, 0, G*J/L, 0, 0, 0, 0, 0, G*J/L, 0, 0],
-            [0, 0, -6*E*Iy/L**2/(1 + fz), 0, (2 - fz)*E*Iy/L/(1 + fz), 0, 0, 0,
-             6*E*Iy/L**2/(1 + fz), 0, (4 + fz)*E*Iy/L/(1 + fz), 0],
-            [0, 6*E*Iz/L**3/(1 + fy), 0, 0, 0, (2 - fy)*E*Iz/L/(1 + fy), 0,
-             -6*E*Iz/L**2/(1 + fy), 0, 0, 0, (4 + fy)*E*Iz/L/(1 + fy)]
+            [0, -12*E*Iz/L**3/(1+fy), 0, 0, 0, -6*E*Iz/L**2/(1+fy), 0,
+             12*E*Iz/L**3/(1+fy), 0, 0, 0, -6*E*Iz/L**2/(1+fy)],
+            [0, 0, -12*E*Iy/L**3/(1+fz), 0, 6*E*Iy/L**2/(1 + fz), 0, 0, 0,
+             12*E*Iy/L**3/(1+fz), 0, 6*E*Iy/L**2/(1+fz), 0],
+            [0, 0, 0, -G*J/L, 0, 0, 0, 0, 0, G*J/L, 0, 0],
+            [0, 0, -6*E*Iy/L**2/(1+fz), 0, (2-fz)*E*Iy/L/(1+fz), 0, 0, 0,
+             6*E*Iy/L**2/(1+fz), 0, (4+fz)*E*Iy/L/(1+fz), 0],
+            [0, 6*E*Iz/L**2/(1+fy), 0, 0, 0, (2-fy)*E*Iz/L/(1+fy), 0,
+             -6*E*Iz/L**2/(1+fy), 0, 0, 0, (4+fy)*E*Iz/L/(1+fy)]
         ])
         return k
 
@@ -1077,65 +1067,6 @@ class BarraPortico(Barra):
             for i in range(4):
                 T[3*i:3*(i+1), 3*i:3*(i+1)] = m
             return T
-
-    ############################################
-    # Vectores de fuerzas nodales equivalentes #
-    ############################################
-
-    def rne_qud_vig(self, q: float) -> np.ndarray:
-        """Reacción nodal equivalente, carga uniformemente distribuida, viga.
-
-        La carga debe estar distribuida en toda la longitud del elemento.
-
-        Args:
-            q: carga uniformemente distribuida en toda la longitud de la viga
-
-        Returns:
-            Vector de 4 componentes, tipo np.ndarray (4,)
-        """
-        L = self.longitud
-        v = q*L/12*np.array([6, L, 6, -L])
-        return v
-
-    def rne_qpt_vig(self, p: float, a: float) -> np.ndarray:
-        """Reacción nodal equivalente, carga puntual, viga plana.
-
-        Args:
-            p: carga puntual
-            a: posición de la carga puntual respecto al apoyo izquierdo
-
-        Returns:
-            Vector de 4 componentes, tipo np.ndarray (4,)
-        """
-        L = self.longitud
-
-        b = L - a  # Distancia de la carga puntual al apoyo derecho
-        v1 = p*b**2/L**3 * (3*a+b)
-        v2 = p*a*b**2/L**2
-        v3 = p*a/L**3 * (a+3*b)
-        v4 = -p*a**2*b/L**2
-        return np.array([v1, v2, v3, v4])
-
-    def rne_mcd_vig(self, momento: float, a: float) -> np.ndarray:
-        """Reacción nodal equivalente, momento concentrado, viga plana.
-
-        Args:
-            momento: momento concentrado
-            a: posición del momento concentrado respecto al apoyo izquierdo
-
-        Returns:
-            Vector de 4 componentes, tipo np.ndarray (4,)
-        """
-        M = momento
-        L = self.longitud
-
-        b = L - a  # Distancia del momento concentrado al apoyo derecho
-        v1 = -6*M*a*b/L**3
-        v2 = M*b/L**2 * (b-2*a)
-        v3 = 6*M*a*b/L**3
-        v4 = M*a/L**2 * (a-2*b)
-
-        return np.array([v1, v2, v3, v4])
 
 
 class BarraViga(BarraPortico):
@@ -1260,13 +1191,71 @@ class BarraViga(BarraPortico):
     def transf_coord(self) -> np.ndarray:
         return np.identity(4)
 
+    ############################################
+    # Vectores de fuerzas nodales equivalentes #
+    ############################################
+
+    def rne_qud_vig(self, q: float) -> np.ndarray:
+        """Reacción nodal equivalente, carga uniformemente distribuida, viga.
+
+        La carga debe estar distribuida en toda la longitud del elemento.
+
+        Args:
+            q: carga uniformemente distribuida en toda la longitud de la viga
+
+        Returns:
+            Vector de 4 componentes, tipo np.ndarray (4,)
+        """
+        L = self.longitud
+        v = q*L/12*np.array([6, L, 6, -L])
+        return v
+
+    def rne_qpt_vig(self, p: float, a: float) -> np.ndarray:
+        """Reacción nodal equivalente, carga puntual, viga.
+
+        Args:
+            p: carga puntual
+            a: posición de la carga puntual respecto al apoyo izquierdo
+
+        Returns:
+            Vector de 4 componentes, tipo np.ndarray (4,)
+        """
+        L = self.longitud
+
+        b = L - a  # Distancia de la carga puntual al apoyo derecho
+        v1 = p*b**2/L**3 * (3*a+b)
+        v2 = p*a*b**2/L**2
+        v3 = p*a/L**3 * (a+3*b)
+        v4 = -p*a**2*b/L**2
+        return np.array([v1, v2, v3, v4])
+
+    def rne_mcd_vig(self, momento: float, a: float) -> np.ndarray:
+        """Reacción nodal equivalente, momento concentrado, viga.
+
+        Args:
+            momento: momento concentrado
+            a: posición del momento concentrado respecto al apoyo izquierdo
+
+        Returns:
+            Vector de 4 componentes, tipo np.ndarray (4,)
+        """
+        M = momento
+        L = self.longitud
+
+        b = L - a  # Distancia del momento concentrado al apoyo derecho
+        v1 = -6*M*a*b/L**3
+        v2 = M*b/L**2 * (b-2*a)
+        v3 = 6*M*a*b/L**3
+        v4 = M*a/L**2 * (a-2*b)
+
+        return np.array([v1, v2, v3, v4])
+
 
 @dataclass
 class Estructura(ABC):
     """Estructura hecha de barras.
 
     :arg
-        tipo (int): tipo de estructura según se define en TIPO_ESTRUCTURA
         coords (dict): Coordenadas de los nudos.
             Tiene la forma: {1:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
                 1D: X
@@ -1277,9 +1266,10 @@ class Estructura(ABC):
             Z: saliente.
         restricciones (dict): Nudos restringidos y sus restricciones según se
             define en la clase Nudo.
-        cargas_nodales (dict): cargas nodales
         elementos (list): lista con datos de las barras para configurar los
             instancias de la clase Barra
+        cargas_nodales (dict): cargas nodales
+        frac_amortig (float): fracción de amortiguamiento
     """
     # Públicas
     coords: dict  # Coordenadas de los nudos
@@ -1294,12 +1284,13 @@ class Estructura(ABC):
     _rigidez_global: np.ndarray = field(init=False)  # Matriz de rigidez global
     _fuerza_global: np.ndarray = field(init=False)  # Vector de fuerzas nodales
     _desplaz_gdl: np.ndarray = field(init=False)  # Desplazamientos nodales
-    _freqs: np.ndarray = field(init=False)  # Frecuencias naturales (Hz)
-    _modos: np.ndarray = field(init=False)  # Modos naturales de vibración
+    _omega2: np.ndarray = field(init=False)  # Freqs. angulares al cuadrado
+    _modos: np.ndarray = field(init=False)  # Modos normalizados con M
     _versores: np.ndarray = VERSORES
 
     # Con valores por defecto
-    cargas_nodales: Optional[dict] = None  # No necesarias en cálculo dinámico
+    cargas_nodales: Optional[dict] = None  # Cargas nodales
+    frac_amortig: float = 0.025  # Fracción de amortiguamiento
 
     @abstractmethod
     def __post_init__(self):
@@ -1397,7 +1388,7 @@ class Estructura(ABC):
 
         coordenadas = list(coords.values())
 
-        # Generación de nudos
+        # Instanciación de nudos
         nudos = [Nudo(i, c, tipo) for i, c in enumerate(coordenadas)]
 
         # Asignación de restricciones
@@ -1536,7 +1527,20 @@ class Estructura(ABC):
         d = np.linalg.inv(S) @ F
         self._desplaz_gdl = d  # Guarda d
 
-        # Asignación de los desplazamientos a los nudos correspondientes
+    def set_desplaz_nudos(self, desplaz_gdl=None) -> None:
+        """Asignación de los desplazamientos en los nudos de la estructura.
+
+        :param desplaz_gdl: Vector de desplazamientos en los grados de libertad
+
+        !Llamada a la función necesaria.
+        """
+        if desplaz_gdl is None:  # Si no se da el vector de desplazamientos
+            if self._desplaz_gdl is None:  # Si no hay desplaz. estático
+                desplaz_gdl = np.zeros(self.ngdl)  # Se asume zeros
+            else:  # Si existe desplaz. estático se lo toma.
+                desplaz_gdl = self.desplaz_gdl()
+
+        d = desplaz_gdl  # Vector de desplazamientos
         ngdl_nudo = self.ngdl_nudo  # Número de grados de libertad por nudo
         ngdl = self.ngdl  # Número de grados de libertad de la estructura
         for nudo in self.nudos():
@@ -1555,9 +1559,14 @@ class Estructura(ABC):
     def reacciones(self) -> np.ndarray:
         """Devuelve las reacciones en los grados de restricción."""
         K10 = self.rigidez_global()[self.ngdl:, :self.ngdl]
+        P1 = self.fuerza_global()[self.ngdl:]
         d = self.desplaz_gdl()
-        R = K10 @ d
+        R = K10 @ d - P1
         return R
+
+    #####################
+    # Análisis dinámico #
+    #####################
 
     def set_autos(self) -> None:
         """Valores y vectores característicos.
@@ -1565,21 +1574,152 @@ class Estructura(ABC):
         Frecuencias naturales (Hz) y modos de vibración.
         """
         w2, S = eigh(self.rigidez_gdl(), self.masa_gdl())
-        f = np.sqrt(w2) / (2*np.pi)  # Frecuencias en Hz
-        modos_norm_uno = norm_uno(S)  # Normalización a |max| = 1
-        self._freqs = f
-        self._modos = modos_norm_uno
+        self._omega2 = w2  # Valores característicos
+        self._modos = S  # Vectores característicos
 
+    @property
+    def omega2(self) -> np.ndarray:
+        """Frecuencias angulares naturales al cuadrado."""
+        return self._omega2
+
+    @property
     def freqs(self) -> np.ndarray:
         """Frecuencias naturales de vibración."""
-        return self._freqs
+        return np.sqrt(self.omega2)/2/np.pi
 
+    @property
     def modos(self) -> np.ndarray:
         """Modos naturales de vibración.
 
-        Normalizado tal que el valor absoluto del máximo es igual a 1.
+        Vectores normalizados con la matriz de masas (Phi.T M Phi = I)
         """
         return self._modos
+
+    def modos_max_uno(self) -> np.ndarray:
+        """Modos naturales de vibración.
+
+           Normalizados tal que el valor absoluto máximo de cada modo es 1.
+        """
+        return norm_uno(self._modos)
+
+    def desplaz_arm(self, f_forzada: float, lapso: tuple[float, float])\
+            -> np.ndarray:
+        """Desplazamientos debidos a cargas armónicas.
+
+        Se asume que los desplazamientos estáticos son los valores de la
+        deformación en t = 0, y que la velocidad de los desplazamientos en t=0
+        es 0.
+
+        :param f_forzada: Frecuencia de vibración forzada en Hz.
+        :param lapso: periodo de análisis
+
+        :returns Matriz de desplazamientos nodales dinámicos en el lapso dado.
+            Cada fila contiene los valores de los desplazamientos en los grados
+            de libertad para un valor de tiempo t fijo.
+        """
+        ngdl = self.ngdl  # Número de grados de libertad de la estructura
+        phi = self.modos  # Matriz de modos de vibración normalizada con M
+        p = self.fuerza_gdl()  # Vector de fuerzas en los grados de libertad
+        omega2 = self.omega2  # Vector de frecuencias angulares al cuadrado
+        wn = np.sqrt(omega2)  # Frecuencias angulares naturales
+        w = 2*np.pi*f_forzada  # Frecuencia angular de vibración forzada
+        zeta = self.frac_amortig  # Fracción de amortiguamiento
+        wD = wn*np.sqrt(1 - zeta**2)  # Frecuencias amortiguadas
+        t0, tf = lapso  # tiempo inicial y tiempo final
+        periodo = np.linspace(t0, tf)  # 50 valores en el período de análisis
+
+        # Desplaz. estáticos como valores de la deformación en t=0
+        Xs = self.desplaz_gdl()
+
+        # Coeficientes A, B, C, D para cálculo de desplazamientos
+        # Chopra ec. (3.2.5)
+        P = phi.T @ p  # Vector de cargas generalizadas
+        r = w / np.sqrt(omega2)  # Vector de ngdl valores
+        denominador = ((1-r**2)**2 + (2*zeta*r)**2)  # Vector
+        C = P/omega2*(1 - r**2) / denominador  # Vector
+        D = P/omega2 * (-2*zeta*r / denominador)  # Vector
+        A = D - Xs  # Vector
+        B = (A*wn*zeta - C*w) / wD  # Vec
+
+        m = len(periodo)  # Número de filas = valores de tiempo
+        n = len(ngdl)  # Número de columnas = número de grados de libertad
+        Qn = np.zeros((m, n))  # Ini. matriz de desplazamientos generalizados
+        Un = np.zeros((m, n))  # Ini. matriz de desplazamientos
+
+        for i, t in enumerate(periodo):
+            # Desplaz. generalizados en los gdl's para un t dado
+            transitoria = np.e**(-zeta*wn*t)*(A*np.cos(wD*t) + B*np.sin(wD*t))
+            estacionaria = C*np.sin(w*t) + D*np.cos(w*t)
+            Qn[i] = transitoria + estacionaria
+
+            Un[i] = phi @ Qn[i]  # Desplazamientos nodales en tiempo = t
+
+        return Un
+
+    def desplaz_esc(self, lapso: tuple[float, float]) -> np.ndarray:
+        """Desplazamientos debidos a cargas escalonadas.
+
+        Una carga escalonada salta de repente de cero a un valor constante.
+
+        :param lapso: periodo de análisis
+
+        :returns Matriz de desplazamientos nodales dinámicos en el lapso dado.
+            Cada fila contiene los valores de los desplazamientos en los grados
+            de libertad para un valor de tiempo t fijo.
+        """
+        ngdl = self.ngdl  # Número de grados de libertad de la estructura
+        phi = self.modos  # Matriz de modos de vibración normalizada con M
+        omega2 = self.omega2  # Vector de frecuencias angulares al cuadrado
+        wn = np.sqrt(omega2)  # Frecuencias angulares naturales
+        dseta = self.frac_amortig  # Fracción de amortiguamiento
+        t0, tf = lapso  # tiempo inicial y tiempo final
+        periodo = np.linspace(t0, tf)  # 50 valores de t en período de análisis
+        wD = wn*np.sqrt(1-dseta**2)
+        Xs = self.desplaz_gdl()  # Desplazamientos del cálculo estático
+
+        m = len(periodo)  # Número de filas = valores de tiempo
+        n = len(ngdl)  # Número de columnas = número de grados de libertad
+        Qn = np.zeros((m, n))  # Ini. matriz de desplazamientos generalizados
+        Un = np.zeros((m, n))  # Ini. matriz de desplazamientos
+
+        for i, t in enumerate(periodo):
+            # Desplaz. generalizados en los gdl's para un t dado
+            Qn[i] = 2*Xs*(1 - np.e**(-dseta*wn*t) *
+                          (np.cos(wD*t) + dseta/np.sqrt(1-dseta**2) *
+                           np.sin(wD*t)))
+
+            Un[i] = phi @ Qn[i]  # Desplazamientos nodales en tiempo = t
+
+        return Un
+
+    def desplaz_estaticos_equiv(self, desplaz_din: np.ndarray) -> np.ndarray:
+        """Desplazamientos estáticos equivalentes.
+
+        Para el cálculo de fuerzas debidas a cargas dinámicas.
+
+        :param desplaz_din: Matriz de desplazamientos dinámicos en un lapso de
+            tiempo. Cada fila debe contener los desplazamientos en los grados
+            de libertad para un tiempo t dado.
+
+        :returns Vector de desplazamientos estáticos equivalentes.
+        """
+        Un = desplaz_din
+        m, n = Un.shape
+        kdim = np.diag(self.omega2)  # Matriz de rigidez dinámica normalizada
+        S = self.rigidez_gdl()  # Matriz de rigidez estática en los gdl's
+        invS = np.linalg.inv(S)  # Inversa de la matriz de rigidez
+        Dn = np.zeros((m, n))
+        for i in range(m):
+            F = kdim @ Un[i]  # Fuerzas estáticas equivalentes
+            Dn[i] = invS @ F  # Desplazamientos estáticos equivalentes
+
+        Xequiv = Dn.sum(axis=0)  # Suma la contribución de cada modo
+
+        return Xequiv
+
+    ###############
+    # Parte final #
+    ###############
 
     def procesamiento(self, tipo_analisis='estatico') -> tuple:
         """Procesamiento estático o dinámico.
@@ -1599,7 +1739,7 @@ class Estructura(ABC):
                 - Modos de vibración normalizados a |max| = uno.
         """
         # Configuración de nudos y barras
-        print("Configuración de nudos y barras...")
+        print("\nConfiguración de nudos y barras...")
         self.config()  # Realiza configuración
         nudos = self.nudos()
         barras = self.barras()
@@ -1616,6 +1756,7 @@ class Estructura(ABC):
                 print("Resolución del problema estático...")
                 # Desplazamientos nodales estáticos
                 self.set_desplaz_gdl()  # Resuelve el problema estático
+                self.set_desplaz_nudos()  # Asigna desplaz. a los nudos
                 Xs = self.desplaz_gdl()
 
                 # Reacciones estáticas
@@ -1629,8 +1770,8 @@ class Estructura(ABC):
             # Resolución del problema de autovalores
             print("Resolución del problema de autovalores...")
             self.set_autos()
-            freqs = self.freqs()
-            modos = self.modos()
+            freqs = self.freqs
+            modos = self.modos
             print("Listo.")
             return freqs, modos
 
@@ -1656,6 +1797,19 @@ class Estructura(ABC):
         # Dibuja las barras en líneas
         for b in barras:
             b.dibujar(espesor_area=espesor_area, color=color, ax=ax, **kwargs)
+
+    def dibujar_deform(self, espesor_area=False, amp=1, colorear=False,
+                       ax=None, **kwargs):
+        """Dibuja la estructura deformada usando matplotlib."""
+
+        barras = self.barras()
+        if self.dim == 3 and ax is None:
+            raise Exception('Debe proveer -ax- para el dibujo 3D')
+
+        # Dibuja las barras en líneas
+        for b in barras:
+            b.dibujar_deform(espesor_area=espesor_area, amp=amp,
+                             colorear=colorear, ax=ax, **kwargs)
 
 
 @dataclass
@@ -1764,6 +1918,7 @@ class Reticulado(Estructura):
                 print("Resolución del problema estático...")
                 # Desplazamientos nodales estáticos
                 self.set_desplaz_gdl()  # Resuelve el problema estático
+                self.set_desplaz_nudos()  # Asigna desplaz. a los nudos
                 self.set_tensiones()  # Calcula y guarda las tensiones axiales
 
                 # Resultados a mostrar
@@ -1779,8 +1934,8 @@ class Reticulado(Estructura):
             # Resolución del problema de autovalores
             print("Resolución del problema de autovalores...")
             self.set_autos()
-            freqs = self.freqs()
-            modos = self.modos()
+            freqs = self.freqs
+            modos = self.modos
             print("Listo.")
             return freqs, modos
 
@@ -1896,7 +2051,7 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
         [numero_nudo_inicial, numero_nudo_final, Material, Seccion]
     """
     if type(datos_nudos) is str:
-        npd = pd.read_csv(datos_nudos)  # Nudos en pandas dataframe
+        npd = pd.read_csv(datos_nudos)  # Nudos pandas dataframe
         nnp = npd.to_numpy()  # Nudos en numpy ndarray
     elif type(datos_nudos) is dict:
         nnp = np.array(list(datos_nudos.values()))
@@ -1904,7 +2059,7 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
         raise Exception("Verifica datos de nudos.")
 
     if type(datos_barras) == str:
-        bpd = pd.read_csv(datos_barras)  # Barras en pandas dataframe
+        bpd = pd.read_csv(datos_barras)  # Barras pandas dataframe
         bnp = bpd.to_numpy()  # Barras en numpy ndarray
     elif type(datos_barras) == dict:
         bnp = np.array(list(datos_barras.values()))
@@ -1918,7 +2073,7 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
     elementos = []
     for i, b in enumerate(bnp):
         c = len(b)
-        if c == 4:  # Si no se da el roll (pórticos) o no importa (reticulados)
+        if c == 4:  # Si no se da el roll
             Ni, Nf, m, s = tuple(b)
             elementos.append([Ni, Nf, materiales[m-1], secciones[s-1]])
         elif c == 5:  # Si se da el dato de roll
@@ -1953,190 +2108,6 @@ def norm_uno(modos):
     return S.T
 
 
-# def desplaz_t(phi_p: np.ndarray, wf: float, wn: np.ndarray, modos:np.ndarray,
-#               t: float) -> np.ndarray:
-#     """Desplazamientos nodales en función del tiempo.
-#
-#     Devuelve el vector de desplazamientos nodales u(t).Se suponen condiciones
-#     iniciales homogéneas u(0)=0, du/dt(0) = 0
-#
-#     Ecuaciones según: Anil K. Chopra "Dinámica de estructuras" 4ta. Ed.
-#
-#     Args:
-#         phi_p: Amplitudes de las fuerzas en los gdl's de la estructura en
-#             coordenadas modales
-#         wf: frecuencia angular de vibración forzada (de las fuerzas externas)
-#         wn: vector de frecuencias angulares naturales
-#         modos: matriz de autovectores de la estructura normalizados con la
-#                 matriz de masas.
-#         t: tiempo (segundos).
-#
-#     Returns:
-#         Vector de desplazamientos en el tiempo t.
-#     """
-#     q = [phi_p[i] / (w ** 2 - wf ** 2) * (np.sin(wf * t) - wf / w *
-#                                           np.sin(w * t)) for i, w in
-#          enumerate(wn)]
-#     q = np.array(q)
-#     u = modos @ q
-#
-#     return u
-#
-#
-# def desplaz_lapso(p: np.ndarray, ff: float, w2: np.ndarray, modos:np.ndarray,
-#                   lapso: float, mps=1.0) -> np.ndarray:
-#     """Desplazamientos de los gdl's de la estructura en el periodo 0 a lapso.
-#
-#     Calcula desplazamientos cada 1/mps segundos durante el tiempo T.
-#
-#     La fila 't' contiene desplazamientos de todos los nudos en el tiempo 't'
-#     La columna 'g' contiene los desplaz. del gdl 'g' en el lapso 0 a T.
-#
-#     Args:
-#         p: Amplitudes de las fuerzas en los gdl's de la estructura
-#         ff: frecuencia de vibración forzada (freq. de las fuerzas externas)
-#         w2: vector de autovalores de la estructura (cuadrados de las
-#             frecuencias angulares)
-#         modos: matriz de autovectores de la estructura normalizados con la
-#                 matriz de masas.
-#         lapso: período de análisis (segundos).
-#         mps: muestreo por segundo. Cantidad de veces por segundo que se hará
-#             el cálculo de los desplazamientos.
-#
-#     Returns:
-#         Matriz (int(mps*T), ngdl) de desplazamientos de los nudos de la
-#         estructura en el lapso de tiempo t0 = 0, tf = lapso.
-#     """
-#     PhiP = modos @ p  # Fuerzas en coordenadas modales
-#     wf = 2 * np.pi * ff  # Frecuencia angular forzada
-#     wn = np.sqrt(w2)  # Vector de frecuencias angulares naturales
-#
-#     tiempos = np.lin-space(0, lapso, int(mps * lapso))  # Valores de tiempo
-#     m = len(tiempos)  # Número de filas = cantidad de tiempos analizados
-#     n = len(p)  # Número de columnas = número de grados de libertad
-#     UU = np.zeros((m, n))  # Inicialización de la matriz de desplazamientos
-#     for i, t in enumerate(tiempos):
-#         u = desplaz_t(PhiP, wf, wn, modos, t)
-#         UU[i] = u
-#
-#     return UU
-#
-#
-# def desplaz_min y max(p: np.ndarray, ff: float, w2: np.ndarray,
-#                     modos: np.ndarray, lapso=10.0, mps=1.0) ->\
-#         tuple[np.ndarray, np.ndarray]:
-#     """Envolvente de desplazamientos dinámicos nodales (min y max).
-#
-#     Obs: no son concomitantes.
-#
-#     Args:
-#         p: Amplitudes de las fuerzas en los gdl's de la estructura
-#         ff: frecuencia de vibración forzada (freq. de las fuerzas externas)
-#         w2: vector de autovalores de la estructura
-#             (cuadrados de las frecuencias angulares)
-#         modos: matriz de autovectores de la estructura normalizados con la
-#                 matriz de masas.
-#         lapso: período de análisis (segundos).
-#         mps: muestreo por segundo
-#
-#     Returns:
-#         Lista con valores mínimos y máximos de desplazamientos en los grados
-#         de libertad de la estructura.
-#     """
-#     UU = desplaz_lapso(p, ff, w2, modos, lapso, mps)
-#     máximos = np.max(UU, axis=0)
-#     mínimos = np.min(UU, axis=0)
-#
-#     return mínimos, máximos
-#
-#
-# def tensiones_min y max(propiedades: dict, p: np.ndarray, ff: float,
-#                       w2: np.ndarray, modos: np.ndarray, lapso=10.0,
-#                       mps=1.0) -> tuple[np.ndarray, np.ndarray]:
-#     """Envolvente de tensiones dinámicas en las barras (mínimos y máximos)
-#
-#     Obs: no son concomitantes.
-#
-#     Args:
-#         propiedades: Obtenido de config()
-#         p: Amplitudes de las fuerzas en los gdl's de la estructura
-#         ff: frecuencia de vibración forzada (freq. de las fuerzas externas)
-#         w2: vector de autovalores de la estructura
-#             (cuadrados de las frecuencias angulares)
-#         modos: matriz de autovectores de la estructura normalizados con la
-#                 matriz de masas.
-#         lapso: período de análisis (segundos).
-#         mps: muestreo por segundo.
-#
-#     Returns:
-#         Tupla con valores mínimos y máximos de las tensiones.
-#     """
-#     UU = desplaz_lapso(p, ff, w2, modos, lapso, mps)  # Desplaz.diferentes ts
-#     nb = len(propiedades['Barras'])  # Número de barras
-#     nt = int(mps * lapso)  # Número de tiempos
-#     FF = np.zeros((nt, nb))
-#
-#     for i, U in enumerate(UU):  # Recorre las deformaciones
-#         FF[i] = obtener_fuerzas(propiedades)  # Fuerzas normales en barras
-#     F min = np.min(FF, axis=0)  # Fuerzas mínimas en las barras
-#     F max = np.max(FF, axis=0)  # Fuerzas máximas en las barras
-#
-#     barras = propiedades['Barras']
-#     areas = np.array([b.prop_sección.area for b in barras])
-#     T min = F min / areas
-#     T max = F max / areas
-#
-#     return T min, T max
-#
-#
-# def obtener_reacciones(kg:np.ndarray, d:np.ndarray, ngdl: int) -> np.ndarray:
-#     """Devuelve las reacciones en los grados de restricción
-#
-#     :arg
-#         kg: matriz de rigidez global
-#         d: vector de desplazamientos en los gdl's
-#         ngdl: número de grados de libertad
-#
-#     :returns
-#         Reacciones en los apoyos.
-#     """
-#     K10 = kg[ngdl:, :ngdl]
-#     R = K10 @ d
-#     return R
-#
-#
-# def reacciones_min y max(kg:np.ndarray, ng dr:int, p,ff,w2, modos,
-# lapso=10.0,
-#                        mps=1.0) -> tuple[np.ndarray, np.ndarray]:
-#     """Envolvente de reacciones (mínimos y máximos).
-#
-#     :arg
-#         kg: matriz de rigidez global
-#         ng dr: número de grados de restricción
-#         T: período de tiempo considerado desde t = 0.
-#         p: Amplitudes de las fuerzas en los gdl's de la estructura
-#         ff: frecuencia de vibración forzada (freq. de las fuerzas externas)
-#         w2: vector de autovalores de la estructura
-#         modos: matriz de autovectores de la estructura
-#         mps: muestreo por segundo. Cantidad de veces por segundo que se
-#         calcularán los desplazamientos.
-#
-#     :returns
-#         Tupla con valores de reacciones mínimos y máximos.
-#     """
-#     ngdl = len(p)  # Número de grados de libertad
-#     UU = desplaz_lapso(p, ff, w2, modos, lapso, mps)  # Desplazamientos
-#     nt = UU.shape[0]  # Número de tiempos
-#     RR = np.zeros((nt, ng dr))  # Inicialización
-#
-#     for i, U in enumerate(UU):
-#         RR[i] = obtener_reacciones(kg, U, ngdl)
-#
-#     reacciones_mínimas = np.min(RR, axis=0)
-#     reacciones_máximas = np.max(RR, axis=0)
-#
-#     return reacciones_mínimas, reacciones_máximas
-
 def mostrar_resultados(resultados):
     n_results = len(resultados)  # Número de resultados
     if n_results == 4:  # Respuesta estática
@@ -2167,61 +2138,6 @@ def mostrar_resultados(resultados):
         print('Verificar la cantidad de resultados de -procesamiento-')
         print()
 
-#
-# def respuesta_dinámica(frecuencias: np.ndarray, u_env: tuple[np.ndarray],
-#                        s_env: tuple[np.ndarray], r_env: tuple[np.ndarray],
-#                        lapso: float) -> None:
-#     """Resultados del análisis dinámico.
-#
-#     Los valores no son concomitantes, es decir no aparecen al mismo tiempo.
-#
-#     Args:
-#         frecuencias: frecuencias naturales de la estructura
-#         u_env: Envolvente de desplazamientos (mín y máx) de los gdl's
-#         s_env: Envolvente de tensiones
-#         r_env: Envolvente de reacciones
-#         lapso: período de tiempo analizado, desde t=0s
-#
-#     Returns:
-#         Imprime los resultados
-#     """
-#     freq = np.round(frecuencias, 2)  # Frecuencias
-#     U min = np.round(u_env[0] * 1000, 2)  # Desplazamientos mínimos en mm
-#     U max = np.round(u_env[1] * 1000, 2)  # Desplazamientos máximos en mm
-#     T min = np.round(s_env[0] * 1e-6, 2)  # Tensiones mínimas en MPa
-#     T max = np.round(s_env[1] * 1e-6, 2)  # Tensiones máximas en MPa
-#     R min = np.round(r_env[0] * 1e-3, 2)  # Reacciones mínimas en kN
-#     R max = np.round(r_env[1] * 1e-3, 2)  # Reacciones máximas en kN
-#
-#     print('RESULTADOS DINÁMICOS:')
-#     print('- Período de tiempo analizado (s):', lapso, 's')
-#     print('- Frecuencias naturales (Hz):', freq)
-#     print('- Envolvente de desplazamientos (mm):', list(zip(U min, U max)))
-#     print('- Envolvente de tensiones (MPa):', list(zip(T min, T max)))
-#     print('- Envolvente de reacciones (MPa):', list(zip(R min, R max)))
-#     print()
-#
-#
-# def mostrar_resultados(resultados):
-#     """Resultado del análisis estático o dinámico.
-#
-#     Args:
-#         resultados: tupla devuelta por el método 'procesamiento'
-#
-#     Returns:
-#         Imprime resultados.
-#     """
-#     tipo_análisis = resultados[-1]
-#     if tipo_análisis == 'estático':
-#         _, Xs, Fs, Ts, Rs, _ = resultados
-#         # Resultados estáticos
-#         respuesta_estática(Xs, Fs, Ts, Rs)
-#     else:
-#         _, frecuencias, modos, UU, U env, Tenv, Renv, lapso, _ = resultados
-#
-#         # Resultados dinámicos
-#         respuesta_dinámica(frecuencias, U env, Tenv, Renv, lapso)
-
 
 def grafica_de_modo(barras, n, amp):
 
@@ -2243,7 +2159,7 @@ def grafica_de_modo(barras, n, amp):
 
     # Estructura deformada
     for b in barras:
-        b.dibuja3d_deform(axs, amp)
+        b.dibujar_deform(axs, amp)
 
 
 def main():
