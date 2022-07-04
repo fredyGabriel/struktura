@@ -4,12 +4,12 @@
 # Inicio de escritura del código: 06 de mayo de 2022
 # Release 1: 18 de mayo de 2022
 # Control git: 01 de junio de de 2022
-# Versión actual: 0.1
-# Versión 0.2: 17 de junio de 2022
+# Versión inicial: 0.1
+# Versión 0.2: 02 de julio de 2022
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import ClassVar, Optional
+from typing import ClassVar, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -75,6 +75,18 @@ VERSORES = np.array([
     [0, 1, 0],
     [0, 0, 1]
 ])
+
+# Base de datos de perfiles AISC
+# https://www.aisc.org/publications/steel-construction-manual-resources/#37584
+PERFIL_AISC = pd.read_excel(io='/Users/fgrv/Documents/GitHub/struktura/'
+                               'analisa/aisc-shapes-database-v15.0.xlsx',
+                            sheet_name=1)
+
+# Voy cargando según necesidad
+# Perfiles L de alas iguales Gerdau Corsa
+# https://www.gerdaucorsa.com.mx/sites/mx_gerdau/files/PDF/Manual_Perfiles_Estructurales_2019_new%20Validado-min_8.pdf
+GERDAU = pd.read_excel(io='/Users/fgrv/Documents/GitHub/struktura/'
+                             'analisa/gerdaucorsa.xlsx', sheet_name=1)
 
 
 #%%
@@ -315,6 +327,46 @@ class Seccion:
     modulo_torsion: Optional[float] = None  # Módulo de torsión
     area_cortante_y: Optional[float] = None  # Área efectiva a cortante en y
     area_cortante_z: Optional[float] = None  # Área efectiva a cortante en z
+
+
+# Función global para instancias de Seccion
+def perfil_aisc(nombre: str) -> Seccion:
+    """Instancia de Seccion para el perfil dado.
+
+    :param nombre: Nombre del pefil según convención AISC
+    :returns Instancia de tipo Seccion
+    """
+    idx = PERFIL_AISC.index[PERFIL_AISC['EDI_Std_Nomenclature'] == nombre][0]
+    A = PERFIL_AISC.loc[idx, 'A.1']*1e-3**2  # Área
+    Iy = PERFIL_AISC.loc[idx, 'Iy.1']*1e-3**4*1e6  # Inercia en y
+    Iz = PERFIL_AISC.loc[idx, 'Ix.1']*1e-3**4*1e6  # Inercia en z
+    J_temp = PERFIL_AISC.loc[idx, 'J.1']  # Módulo de torsión
+
+    # Si no se da el valor de J se asume igual a cero.
+    if isinstance(J_temp, int) or isinstance(J_temp, float):
+        J = J_temp*1e-3**4*1e3
+    else:
+        J = 0.0
+        print(f'Chequear el valor de J para {nombre}. Se asume igual a cero.')
+
+    s = Seccion(A, Iy, Iz, J)
+    return s
+
+
+# Función global para instancias de Seccion
+def perfil_gerdau(nombre: str) -> Seccion:
+    """Instancia de Seccion para el perfil dado.
+
+    :param nombre: Nombre del pefil según convención AISC
+    :returns Instancia de tipo Seccion
+    """
+    idx = GERDAU.index[GERDAU['Designación'] == nombre][0]
+    A = GERDAU.loc[idx, 'A']*1e-2**2  # Área
+    Iy = GERDAU.loc[idx, 'Iy']*1e-2**4  # Inercia en y
+    Iz = GERDAU.loc[idx, 'Ix']*1e-2**4  # Inercia en z
+    J = GERDAU.loc[idx, 'J']*1e-2**4  # Módulo de torsión
+    s = Seccion(A, Iy, Iz, J)
+    return s
 
 
 #############################
@@ -1626,7 +1678,7 @@ class Estructura(ABC):
         zeta = self.frac_amortig  # Fracción de amortiguamiento
         wD = wn*np.sqrt(1 - zeta**2)  # Frecuencias amortiguadas
         t0, tf = lapso  # tiempo inicial y tiempo final
-        periodo = np.linspace(t0, tf)  # 50 valores en el período de análisis
+        periodo = np.linspace(t0, tf, 100)  # 100 vals. en período de análisis
 
         # Desplaz. estáticos como valores de la deformación en t=0
         Xs = self.desplaz_gdl()
@@ -1642,7 +1694,7 @@ class Estructura(ABC):
         B = (A*wn*zeta - C*w) / wD  # Vec
 
         m = len(periodo)  # Número de filas = valores de tiempo
-        n = len(ngdl)  # Número de columnas = número de grados de libertad
+        n = ngdl  # Número de columnas = número de grados de libertad
         Qn = np.zeros((m, n))  # Ini. matriz de desplazamientos generalizados
         Un = np.zeros((m, n))  # Ini. matriz de desplazamientos
 
@@ -1673,12 +1725,12 @@ class Estructura(ABC):
         wn = np.sqrt(omega2)  # Frecuencias angulares naturales
         dseta = self.frac_amortig  # Fracción de amortiguamiento
         t0, tf = lapso  # tiempo inicial y tiempo final
-        periodo = np.linspace(t0, tf)  # 50 valores de t en período de análisis
+        periodo = np.linspace(t0, tf, 100)  # 100 vals de t en per. analizado
         wD = wn*np.sqrt(1-dseta**2)
         Xs = self.desplaz_gdl()  # Desplazamientos del cálculo estático
 
         m = len(periodo)  # Número de filas = valores de tiempo
-        n = len(ngdl)  # Número de columnas = número de grados de libertad
+        n = ngdl  # Número de columnas = número de grados de libertad
         Qn = np.zeros((m, n))  # Ini. matriz de desplazamientos generalizados
         Un = np.zeros((m, n))  # Ini. matriz de desplazamientos
 
@@ -1798,8 +1850,7 @@ class Estructura(ABC):
         for b in barras:
             b.dibujar(espesor_area=espesor_area, color=color, ax=ax, **kwargs)
 
-    def dibujar_deform(self, espesor_area=False, amp=1, colorear=False,
-                       ax=None, **kwargs):
+    def dibujar_deform(self, espesor_area=False, amp=1, ax=None, **kwargs):
         """Dibuja la estructura deformada usando matplotlib."""
 
         barras = self.barras()
@@ -1808,8 +1859,63 @@ class Estructura(ABC):
 
         # Dibuja las barras en líneas
         for b in barras:
-            b.dibujar_deform(espesor_area=espesor_area, amp=amp,
-                             colorear=colorear, ax=ax, **kwargs)
+            b.dibujar_deform(espesor_area=espesor_area, amp=amp, ax=ax,
+                             **kwargs)
+
+    def grafica_de_modo(self, espesor_area=False, n=0, amp=1, **kwargs)\
+            -> None:
+        """Gráfica de modo de vibración.
+
+        :param espesor_area: Considerar el espersor de las líneas proporcional
+            al área de las barras.
+        :param n: número de modo de vibración
+        :param amp: factor de amplifiación de las deformaciones
+        :param kwargs: parámetros que se pasan a matplotlib 3D
+        """
+
+        # Estructura deformada según modo de vibración establecido
+        normalizado = self.modos_max_uno()
+        self.set_desplaz_nudos(normalizado[n])
+
+        # Definición del título del gráfico
+        if n == 0:
+            titulo = "Modo fundamental\n"
+        else:
+            titulo = f"Modo de vibración Nº {n+1}\n"
+
+        # Gráfico para estructuras 2D
+        if self.dim == 2:
+            plt.axis('equal');
+            plt.title(titulo)
+            plt.text(.1, 1.1, f"freq = {self.freqs[n]:.1f} Hz", fontsize=12)
+            plt.xlabel("X (m)")
+            plt.ylabel("Y (m)")
+
+            self.dibujar_deform(espesor_area=espesor_area, amp=amp, **kwargs)
+
+        # Gráfico para estructuras 3D
+        elif self.dim == 3:
+
+            fg = plt.figure()
+            axs = fg.add_subplot(projection='3d')
+
+            axs.set_title(titulo)
+            axs.set_xlabel("X (m)")
+            axs.set_ylabel("Y (m)")
+            axs.set_zlabel("Z (m)")
+            axs.text(-.5, -.5, 6, f"freq = {self.freqs[n]:.1f} Hz")
+
+            axs.set_box_aspect((1, 1, 6))
+            axs.set_xlim3d(-.5, .5)
+            axs.set_ylim3d(-.5, .5)
+            axs.set_zlim3d(0, 5.5)
+            axs.tick_params(axis='x', labelsize=5)
+            axs.tick_params(axis='y', labelsize=5)
+            axs.tick_params(axis='z', labelsize=10)
+            axs.zaxis.labelpad = 30
+
+            self.dibujar_deform(espesor_area=espesor_area, ax=axs, amp=amp,
+                                **kwargs)
 
 
 @dataclass
@@ -2026,7 +2132,9 @@ class Grilla(Estructura):
 # Funciones globales #
 ######################
 
-def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
+def preprocesamiento(datos_nudos: Union[str, dict],
+                     datos_barras: Union[str, dict],
+                     materiales: list[Material], secciones: list[Seccion]):
     """Preprocesamiento. Preparación de datos para la clase Estructura.
 
     :param datos_nudos: Una de las siguientes:
@@ -2041,6 +2149,7 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
             - Segunda columna: Número de nudo final
             - Tercera columna: Número de material
             - Cuarta columna: Número de sección
+            - Quinta columna (opcional): Ángulo roll
         - Diccionario: con el número de barra como key y los mismos datos del
             caso csv como values.
     :param materiales: Lista con la clase Material
@@ -2060,7 +2169,7 @@ def preprocesamiento(datos_nudos, datos_barras, materiales, secciones):
 
     if type(datos_barras) == str:
         bpd = pd.read_csv(datos_barras)  # Barras pandas dataframe
-        bnp = bpd.to_numpy()  # Barras en numpy ndarray
+        bnp = bpd.to_numpy()  # Barras en numpy ndarray (vectorización)
     elif type(datos_barras) == dict:
         bnp = np.array(list(datos_barras.values()))
     else:
@@ -2139,30 +2248,9 @@ def mostrar_resultados(resultados):
         print()
 
 
-def grafica_de_modo(barras, n, amp):
-
-    fg = plt.figure()
-    axs = fg.add_subplot(projection='3d')
-    axs.set_box_aspect((1, 1, 6))
-    axs.set_xlim3d(-.5, .5)
-    axs.set_ylim3d(-.5, .5)
-    axs.set_zlim3d(0, 6)
-
-    axs.set_title(f"Modo de vibración Nº {n+1}\n")
-    axs.set_xlabel("X (m)")
-    axs.set_ylabel("Y (m)")
-    axs.set_zlabel("Z (m)")
-    axs.tick_params(axis='x', labelsize=6)
-    axs.tick_params(axis='y', labelsize=6)
-    axs.tick_params(axis='z', labelsize=10)
-    axs.zaxis.labelpad = 30
-
-    # Estructura deformada
-    for b in barras:
-        b.dibujar_deform(axs, amp)
-
-
 def main():
+    s1 = perfil('L4X4X1/4')  # Cordón superior e inferior en vigas
+    print(s1)
     return
 
 
