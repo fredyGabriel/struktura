@@ -414,6 +414,7 @@ class Barra(ABC):
     # 4. transf_coord
 
     # Públicas
+    num: int  # Número asignado a la barra
     tipo: int  # Tipo de estructura al que pertenece la barra
     nudo_inicial: Nudo  # Nudo inicial
     nudo_final: Nudo  # Nudo final
@@ -558,10 +559,12 @@ class Barra(ABC):
         Q = k @ u - Qf
         return Q
 
-    def dibujar(self, espesor_area=True, color='k', ax=None, **kwargs) -> None:
+    def dibujar(self, num=False, espesor_area=True, color='k', ax=None,
+                **kwargs) -> None:
         """Dibuja la barra en 2D o 3D.
 
         Args:
+            num (int): agregar número asignado a la barra
             espesor_area (bool): Considerar o no las áreas para dibujuar
                 proporcionalmente a ellas el espesor de las líneas.
             color: color de las barras.
@@ -573,22 +576,28 @@ class Barra(ABC):
         else:
             lw = 1
 
-        X0 = self.nudo_inicial.coord  # Coordenadas del nudo inicial
-        Xf = self.nudo_final.coord  # Coordenadas del nudo final
+        X0 = np.asarray(self.nudo_inicial.coord)  # Coords. del nudo inicial
+        Xf = np.asarray(self.nudo_final.coord)  # Coordenadas del nudo final
         coord_separadas = list(zip(X0, Xf))
         X = coord_separadas[0]
         Y = coord_separadas[1]
+        Xm = (X0 + Xf)/2  # Coordenadas del punto medio
         if self.dim == 2:
             plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
+            if num:  # Agregar número asignado al nudo
+                plt.text(Xm[0], Xm[1], str(self.num + 1))
+
+        # TODO agregar número de barra en dibujo 3D
 
         elif self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
 
-    def dibujar_deform(self, espesor_area=True, color='k', amp=1, ax=None,
-                       **kwargs) -> None:
+    def dibujar_deform(self, num=False, espesor_area=True, color='k', amp=1,
+                       ax=None, **kwargs) -> None:
         """Dibuja la barra en su posición desplazada.
 
+        :param num: imprimir número de barra
         :param espesor_area: Considerar en el dibujo el espesor
             relativo de la barra según su área.
         :param color: color de las barras
@@ -601,15 +610,19 @@ class Barra(ABC):
         else:
             lw = 1
 
-        X0d = self.nudo_inicial.posicion(amp)  # Coord. nudo inicial desplazado
-        Xfd = self.nudo_final.posicion(amp)  # Coord. nudo final desplazado
+        X0d = np.asarray(self.nudo_inicial.posicion(amp))
+        Xfd = np.asarray(self.nudo_final.posicion(amp))
         coord_separadas = list(zip(X0d, Xfd))
         X = coord_separadas[0]
         Y = coord_separadas[1]
+        Xm = (X0d + Xfd)/2  # Coordenadas del punto medio
 
         if self.dim == 2:
             plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
+            if num:  # Agregar número asignado al nudo
+                plt.text(Xm[0], Xm[1], str(self.num + 1))
 
+        # TODO agregar número de barra en dibujo 3D para barra deformada
         if self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
@@ -808,11 +821,12 @@ class BarraReticulado(Barra):
         """
         return self.def_unit() * self.longitud
 
-    def dibujar(self, espesor_area=True, color='tension', ax=None, **kwargs)\
-            -> None:
+    def dibujar(self, num=False, espesor_area=True, color='tension', ax=None,
+                **kwargs) -> None:
         """Dibuja la barra en 2D o 3D.
 
         Args:
+            num (bool): imprimir número de barra
             espesor_area (bool): Considerar o no las áreas para dibujuar
                 proporcionalmente a ellas el espesor de las líneas.
             color (str): 'tension' para colorear según tensión en la barra, o
@@ -827,32 +841,37 @@ class BarraReticulado(Barra):
 
         if color == 'tension':  # Colorear la barra según su tensión
             sigma = self.tension()
-            if sigma > 0:  # Tracción
+            if sigma > 1e-4:  # Tracción
                 c = 'b'
-            elif sigma < 0:  # Compresión
+            elif sigma < -1e-4:  # Compresión
                 c = 'r'
             else:
                 c = '0.5'  # Gris para tensión cero
         else:
             c = color
 
-        X0 = self.nudo_inicial.coord  # Coordenadas del nudo inicial
-        Xf = self.nudo_final.coord  # Coordenadas del nudo final
+        X0 = np.asarray(self.nudo_inicial.coord)  # Coords. del nudo inicial
+        Xf = np.asarray(self.nudo_final.coord)  # Coordenadas del nudo final
         coord_separadas = list(zip(X0, Xf))
         X = coord_separadas[0]
         Y = coord_separadas[1]
+        Xm = (X0 + Xf) / 2  # Coordenadas del punto medio
         if self.dim == 2:
             plt.plot(X, Y, color=c, linewidth=lw, **kwargs)
+            if num:
+                plt.text(Xm[0], Xm[1], str(self.num + 1))
 
+        # TODO agregar número de barra en 3D BarraReticulado
         elif self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=c, linewidth=lw, **kwargs)
 
-    def dibujar_deform(self, espesor_area=True, amp=1, colorear=False, ax=None,
-                       **kwargs) -> None:
+    def dibujar_deform(self, num=False, espesor_area=True, amp=1,
+                       colorear=False, ax=None, **kwargs) -> None:
         """Dibuja la barra en su posición desplazada
 
+        :param num: imprimir número de barra
         :param espesor_area: Considerar en el dibujo el espesor
             relativo de la barra según su área.
         :param amp: Factor ae amplificación de desplazamientos
@@ -867,24 +886,28 @@ class BarraReticulado(Barra):
 
         if colorear:
             sigma = self.tension()
-            if sigma > 0:  # Tracción
+            if sigma > 1e-4:  # Tracción
                 color = 'b'
-            elif sigma < 0:  # Compresión
+            elif sigma < -1e-4:  # Compresión
                 color = 'r'
             else:  # Tensión cero
                 color = 'k'
         else:
             color = 'g'
 
-        X0d = self.nudo_inicial.posicion(amp)  # Coord. nudo inicial desplazado
-        Xfd = self.nudo_final.posicion(amp)  # Coord. nudo final desplazado
+        X0d = np.asarray(self.nudo_inicial.posicion(amp))
+        Xfd = np.asarray(self.nudo_final.posicion(amp))
         coord_separadas = list(zip(X0d, Xfd))
         X = coord_separadas[0]
         Y = coord_separadas[1]
+        Xm = (X0d + Xfd) / 2  # Coordenadas del punto medio
 
         if self.dim == 2:
             plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
+            if num:
+                plt.text(Xm[0], X[1], str(self.num + 1))
 
+        # TODO agregar número de barra deformada 3D BarraReticulado
         if self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
@@ -1142,9 +1165,34 @@ class BarraPortico(Barra):
                 return np.array([ix, iy, iz])  # Kassimalli (8.62)
 
     def carga_equiv_local(self) -> np.ndarray:
-        """Vector de _cargas nodales equivalentes en coordenadas locales."""
-        # AÚN NO IMPLEMENTADO
-        return np.zeros(self.ngdl)
+        """Vector de cargas nodales equivalentes en coordenadas locales.
+
+        Admite solo cargas distribuidas en toda la longitud de la barra.
+        Los signos de las cargas deben coincidir con el sistema de coordenadas
+        global.
+        """
+        # TODO verificar validez de resultados
+        Q = self.carga  # Cargas en coordenadas globales
+        Qf = np.zeros(self.ngdl)
+
+        if Q is not None:
+            dim = self.dim
+            M = self.matriz_cos_dir()
+            q = M @ Q  # Cargas en coordenadas locales
+            L = self.longitud
+            if dim == 1:
+                Qf = q*L/2*np.array([1, 1])
+            elif dim == 2:
+                qx, qy = q
+                Qf = np.array([qx*L/2, qy*L/2, qy*L**2/12, qx*L/2, qy*L/2,
+                               -qy*L**2/12])
+            elif dim == 3:
+                qx, qy, qz = q
+                Qf = np.array([qx*L/2, qy*L/2, qz*L/2, 0, qz*L**2/12,
+                               qy*L**2/12, qx*L/2, qy*L/2, qz*L/2, 0,
+                               -qz*L**2/12, -qy*L**2/12
+                               ])
+        return Qf
 
     # Sobreescrito
     def transf_coord(self) -> np.ndarray:
@@ -1300,7 +1348,11 @@ class BarraViga(BarraPortico):
 
     # Sobreescrito
     def carga_equiv_local(self) -> np.ndarray:
-        """Vector de _cargas nodales equivalentes en coordenadas locales."""
+        """Vector de cargas nodales equivalentes en coordenadas locales.
+
+        Admite solo cargas distribuidas en toda la longitud de la barra.
+        El signo de la carga distribuida es positivo hacia abajo.
+        """
         L = self.longitud
         q = self.carga
         Qf = -q*L/12*np.array([6, L, 6, -L])  # Notar el signo
@@ -1334,7 +1386,7 @@ class BarraViga(BarraPortico):
 
 
 class BarraGrilla(BarraPortico):
-    """Barra de grilla"""
+    """Barra de grilla."""
     # Aún no implementado
     pass
 
@@ -1356,7 +1408,8 @@ class Estructura(ABC):
             define en la clase Nudo.
         datos_barras (list): lista con datos de las barras para configurar los
             instancias de la clase Barra
-        cargas_nodales (dict): _cargas nodales
+        cargas_nodales (dict): cargas nodales
+        cargas_barras (dict): cargas en las barras
         frac_amortig (float): fracción de amortiguamiento
     """
     # Públicas
@@ -1402,16 +1455,15 @@ class Estructura(ABC):
         materiales = self.materiales
         secciones = self.secciones
         # Nudos
+        coordenadas = {}  # Inicialización para coordenadas nodales
         if isinstance(dn, str):  # Si es un archivo csv
             npd = pd.read_csv(dn)  # Nudos pandas dataframe
             nnp = npd.to_numpy()  # Nudos en numpy ndarray
-            coordenadas = {}  # Inicialización para coordenadas nodales
             for i, n in enumerate(nnp):
                 coordenadas[i] = tuple(n)
         elif isinstance(dn, dict):  # Si es un diccionario
-            coordenadas = dn
+            coordenadas = dict(sorted(dn.items()))
         elif isinstance(dn, list):  # Si es una lista
-            coordenadas = {}  # Inicialización para coordenadas nodales
             for i, n in enumerate(dn):
                 coordenadas[i] = tuple(n)
         else:
@@ -1422,7 +1474,8 @@ class Estructura(ABC):
             bpd = pd.read_csv(db)  # Barras pandas dataframe
             bnp = bpd.to_numpy()  # Barras en numpy ndarray (vectorización)
         elif isinstance(db, dict):  # Si es un diccionario
-            bnp = np.array(list(db.values()))
+            ordenado = dict(sorted(db.items()))
+            bnp = np.array(list(ordenado.values()))
         elif isinstance(db, list):  # Si es una lista
             bnp = np.array(db)
         else:
@@ -1438,8 +1491,12 @@ class Estructura(ABC):
 
         elementos = []
         for i, b in enumerate(bnp):
-            c = len(b)
-            if c == 4:  # Si no se da el roll
+            c = len(b)  # Cantidad de datos en cada barra
+            if c == 2:  # Si solo se dan los datos de nudos se adopta el
+                # primer material y la primera sección de las listas
+                Ni, Nf = tuple(b)
+                elementos.append([Ni, Nf, materiales[0], secciones[0]])
+            elif c == 4:  # Si no se da el roll
                 Ni, Nf, m, s = tuple(b)
                 elementos.append([Ni, Nf, materiales[m-1], secciones[s-1]])
             elif c == 5:  # Si se da el dato de roll
@@ -1448,7 +1505,7 @@ class Estructura(ABC):
             else:
                 raise ValueError('Verifica datos de barras.')
 
-        self.datos_nudos = coordenadas  # Los datos_nudos ahora es un dict
+        self.datos_nudos = coordenadas  # datos_nudos ahora es un dict ordenado
         self._elementos = elementos  # datos_barras ahora es una lista
 
     @property
@@ -1540,7 +1597,7 @@ class Estructura(ABC):
         ngdl_nudo = self.ngdl_nudo
         Nnudos = self.n_nudos  # Número de nudos
 
-        coordenadas = list(coords.values())
+        coordenadas = list(coords.values())  # Lista ordenada de nudos
 
         # Instanciación de nudos
         nudos = [Nudo(i, c, tipo) for i, c in enumerate(coordenadas)]
@@ -1897,7 +1954,8 @@ class Estructura(ABC):
         for n in nudos:
             n.dibujar(num=num, ax=ax, **kwargs)
 
-    def dibujar_barras(self, espesor_area=False, color='k', ax=None, **kwargs):
+    def dibujar_barras(self, num=False, espesor_area=False, color='k', ax=None,
+                       **kwargs):
         """Dibuja la estructura de barras usando matplotlib."""
 
         barras = self.barras()
@@ -1906,9 +1964,11 @@ class Estructura(ABC):
 
         # Dibuja las barras en líneas
         for b in barras:
-            b.dibujar(espesor_area=espesor_area, color=color, ax=ax, **kwargs)
+            b.dibujar(num=num, espesor_area=espesor_area, color=color, ax=ax,
+                      **kwargs)
 
-    def dibujar_deform(self, espesor_area=False, amp=1, ax=None, **kwargs):
+    def dibujar_deform(self, num=False, espesor_area=False, amp=1, ax=None,
+                       **kwargs):
         """Dibuja la estructura deformada usando matplotlib."""
 
         barras = self.barras()
@@ -1917,8 +1977,8 @@ class Estructura(ABC):
 
         # Dibuja las barras en líneas
         for b in barras:
-            b.dibujar_deform(espesor_area=espesor_area, amp=amp, ax=ax,
-                             **kwargs)
+            b.dibujar_deform(num=num, espesor_area=espesor_area, amp=amp,
+                             ax=ax, **kwargs)
 
     def grafica_de_modo(self, espesor_area=False, n=0, amp=1, **kwargs)\
             -> None:
@@ -1996,9 +2056,9 @@ class Reticulado(Estructura):
         versores = self.versores
 
         # Configuración de las barras
-        barras = [BarraReticulado(self.tipo, nudos[e[0] - 1], nudos[e[1] - 1],
-                                  e[2], e[3], versores) for e in
-                  self._elementos]
+        barras = [BarraReticulado(i, self.tipo, nudos[e[0] - 1],
+                                  nudos[e[1] - 1], e[2], e[3], versores) for
+                  i, e in enumerate(self._elementos)]
 
         self._barras = barras  # Guarda la lista barras
 
@@ -2136,15 +2196,15 @@ class Portico(Estructura):
         else:  # Si es un pórtico
             Bar = BarraPortico
 
-        for e in elementos:
+        for i, e in enumerate(elementos):
             ni = e[0] - 1  # Índice del nudo inicial
             nf = e[1] - 1  # Índice del nudo final
             if len(e) == 4:  # Si no se da el roll
-                bs.append(Bar(self.tipo, nudos[ni], nudos[nf], e[2], e[3],
+                bs.append(Bar(i, self.tipo, nudos[ni], nudos[nf], e[2], e[3],
                               versores, cortante=Q))
             else:  # Si roll es distinto de cero.
                 r = e[4]/180*np.pi  # Conversión a radianes
-                bs.append(Bar(self.tipo, nudos[ni], nudos[nf], e[2], e[3],
+                bs.append(Bar(i, self.tipo, nudos[ni], nudos[nf], e[2], e[3],
                               versores, r, cortante=Q))
 
         self._barras = bs  # Guarda la lista de barras
@@ -2154,16 +2214,18 @@ class Portico(Estructura):
             for nb in cargas.keys():  # Recorre diccionario de cargas
                 barra = bs[nb-1]  # Barra actual
                 q = cargas[nb]  # Cargas en la barra
-                barra._carga = q  # Asignación de carga a la barra
-                Qf = barra.carga_equiv_local()  # Vector de _cargas nodales eq.
-                Ni = barra.nudo_inicial
-                Nf = barra.nudo_final
+                barra._carga = q  # Asignación de cargas distribuidas a barra
+
+                # Vector de cargas nodales eq. en coords. globales
+                F = barra.carga_equiv_global()
 
                 # Suma cargas de tramos a cargas nodales existentes
-                Q0 = Ni.cargas() + Qf[:n]  # Carga total en nudo inicial
-                Q1 = Nf.cargas() + Qf[n:]  # Carga total en nudo final
-                Ni.set_cargas(Q0)  # Asigna carga total al nudo inicial
-                Nf.set_cargas(Q1)  # Asigna carga total al nudo final
+                Ni = barra.nudo_inicial
+                Nf = barra.nudo_final
+                F0 = Ni.cargas() + F[:n]  # Carga total en nudo inicial
+                F1 = Nf.cargas() + F[n:]  # Carga total en nudo final
+                Ni.set_cargas(F0)  # Asigna carga total al nudo inicial
+                Nf.set_cargas(F1)  # Asigna carga total al nudo final
 
     def procesamiento(self, tipo_analisis='estatico') -> None:
         """Procesamiento estático o dinámico.
@@ -2368,9 +2430,37 @@ def mostrar_resultados(resultados):
 
 
 def main():
-    s1 = perfil_aisc('L4X4X1/4')  # Cordón superior e inferior en vigas
-    print(s1)
-    return
+    # Prueba con Kassimali Example 6.7
+    # Datos de los nudos
+    coords = {1: (0, 0), 2: (9, 0), 3: (0, 6), 4: (9, 6), 5: (0, 12)}
+    restricciones = {1: (1, 1, 1), 2: (1, 1, 1)}  # Apoyos
+
+    # Materiales
+    E = 30e9
+    m = Material(E)
+
+    # Datos de las secciones
+    A = 75e-3  # área
+    inercia = 4.8e-4
+    s = Seccion(area=A, inercia_z=inercia)
+
+    # Conectividad
+    datos_barras = {1: (1, 3), 2: (2, 4), 3: (3, 5), 4: (3, 4), 5: (4, 5)}
+
+    # Cargas
+    cargas_nodales = {3: (80e3, 0, 0), 5: (40e3, 0, 0)}
+
+    # Cargas en barras
+    ang = np.arctan(6/9)
+    q = 12e3
+    qx = q*np.sin(ang)
+    qy = q*np.cos(ang)
+    cargas_barras = {5: (qx, qy)}
+    # Instancia de la estructura
+    p = Portico(datos_nudos=coords, restricciones=restricciones,
+                datos_barras=datos_barras, materiales=m, secciones=s,
+                cargas_nodales=cargas_nodales, cargas_barras=cargas_barras)
+    p.procesamiento()
 
 
 if __name__ == "__main__":
