@@ -4,8 +4,7 @@
 # Inicio de escritura del código: 06 de mayo de 2022
 # Release 1: 18 de mayo de 2022
 # Control git: 01 de junio de de 2022
-# Versión inicial: 0.1
-# Versión 0.2: 02 de julio de 2022
+# Versión 0.1: 02 de julio de 2022
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -587,11 +586,11 @@ class Barra(ABC):
             if num:  # Agregar número asignado al nudo
                 plt.text(Xm[0], Xm[1], str(self.num + 1))
 
-        # TODO agregar número de barra en dibujo 3D
-
         elif self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
+            if num:
+                ax.text(Xm[0], X[1], X[2], str(self.num+1))
 
     def dibujar_deform(self, num=False, espesor_area=True, color='k', amp=1,
                        ax=None, **kwargs) -> None:
@@ -622,10 +621,11 @@ class Barra(ABC):
             if num:  # Agregar número asignado al nudo
                 plt.text(Xm[0], Xm[1], str(self.num + 1))
 
-        # TODO agregar número de barra en dibujo 3D para barra deformada
         if self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
+            if num:
+                ax.text(Xm[0], X[1], X[2], str(self.num+1))
 
 
 @dataclass
@@ -861,11 +861,12 @@ class BarraReticulado(Barra):
             if num:
                 plt.text(Xm[0], Xm[1], str(self.num + 1))
 
-        # TODO agregar número de barra en 3D BarraReticulado
         elif self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=c, linewidth=lw, **kwargs)
+            if num:
+                ax.text(Xm[0], X[1], X[2], str(self.num + 1))
 
     def dibujar_deform(self, num=False, espesor_area=True, amp=1,
                        colorear=False, ax=None, **kwargs) -> None:
@@ -907,11 +908,12 @@ class BarraReticulado(Barra):
             if num:
                 plt.text(Xm[0], X[1], str(self.num + 1))
 
-        # TODO agregar número de barra deformada 3D BarraReticulado
         if self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
+            if num:
+                ax.text(Xm[0], X[1], X[2], str(self.num+1))
 
 
 @dataclass
@@ -1184,14 +1186,26 @@ class BarraPortico(Barra):
                 Qf = q*L/2*np.array([1, 1])
             elif dim == 2:
                 qx, qy = q
-                Qf = np.array([qx*L/2, qy*L/2, qy*L**2/12, qx*L/2, qy*L/2,
+                Qf = np.array([qx*L/2,
+                               qy*L/2,
+                               qy*L**2/12,
+                               qx*L/2,
+                               qy*L/2,
                                -qy*L**2/12])
             elif dim == 3:
                 qx, qy, qz = q
-                Qf = np.array([qx*L/2, qy*L/2, qz*L/2, 0, qz*L**2/12,
-                               qy*L**2/12, qx*L/2, qy*L/2, qz*L/2, 0,
-                               -qz*L**2/12, -qy*L**2/12
-                               ])
+                Qf = np.array([qx*L/2,
+                               qy*L/2,
+                               qz*L/2,
+                               0,
+                               qz*L**2/12,
+                               qy*L**2/12,
+                               qx*L/2,
+                               qy*L/2,
+                               qz*L/2,
+                               0,
+                               -qz*L**2/12,
+                               -qy*L**2/12])
         return Qf
 
     # Sobreescrito
