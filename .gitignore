@@ -3,3 +3,7 @@ ferroconcreto/__init__.py
 analisa/__init__.py
 __init__.py
 tests/cal_auxiliares.ipynb
+tests/pruebas2.ipynb
+analisa/__pycache__/struct_gen.cpython-311.pyc
+analisa/__pycache__/edeb.cpython-311.pyc
+analisa/__pycache__/__init__.cpython-311.pyc

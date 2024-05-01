@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Union
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -77,18 +78,18 @@ VERSORES = np.array([
 
 # Base de datos de perfiles AISC
 # https://www.aisc.org/publications/steel-construction-manual-resources/#37584
-PERFIL_AISC = pd.read_excel(io='/Users/fgrv/Documents/GitHub/struktura/'
-                               'analisa/aisc-shapes-database-v15.0.xlsx',
-                            sheet_name=1)
+f1 = os.path.abspath("../analisa/database/aisc-shapes-database-v15.0.xlsx")
+PERFIL_AISC = pd.read_excel(io=f1, sheet_name=1)
 
 # Voy cargando según necesidad
 # Perfiles L de alas iguales Gerdau Corsa
-# https://www.gerdaucorsa.com.mx/sites/mx_gerdau/files/PDF/Manual_Perfiles_Estructurales_2019_new%20Validado-min_8.pdf
-GERDAU = pd.read_excel(io='/Users/fgrv/Documents/GitHub/struktura/'
-                          'analisa/gerdaucorsa.xlsx', sheet_name=1)
+# https://www.gerdaucorsa.com.mx/sites/mx_gerdau/files/PDF/
+# Manual_Perfiles_Estructurales_2019_new%20Validado-min_8.pdf
+f2 = os.path.abspath("../analisa/database/gerdaucorsa.xlsx")
+GERDAU = pd.read_excel(io=f2, sheet_name=1)
 
 
-#%%
+# %%
 @dataclass
 class Nudo:
     """Nudo de estructura de barras
@@ -1444,7 +1445,7 @@ class Estructura(ABC):
     _desplaz_gdl: np.ndarray = field(init=False)  # Desplazamientos nodales
     _omega2: np.ndarray = field(init=False)  # Freqs. angulares al cuadrado
     _modos: np.ndarray = field(init=False)  # Modos normalizados con M
-    _versores: np.ndarray = VERSORES
+    _versores: np.ndarray = field(default_factory=lambda: VERSORES)
 
     # Con valores por defecto
     cargas_nodales: Optional[dict] = None  # Cargas en los nudos
@@ -2139,7 +2140,7 @@ class Reticulado(Estructura):
         # noinspection SpellCheckingInspection
         if tipo_analisis == 'estatico':
             if self.cargas_nodales is None:
-                print("Esta estructura no tiene _cargas.")
+                raise ValueError("Esta estructura no tiene cargas.")
             else:
                 print("Resolución del problema estático...")
                 # Desplazamientos nodales estáticos
