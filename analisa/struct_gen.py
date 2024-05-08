@@ -13,6 +13,8 @@ from typing import List, Tuple, Optional
 class LatticeBeam:
     """Represents a lattice beam structure.
 
+    Nodes a bars numbering starts on 1.
+
     Args:
         a: Left dimension of the beam.
         b: Right dimension of the beam.
@@ -27,7 +29,7 @@ class LatticeBeam:
         long_sec: Longitudinal rod section number
         diag_mat: Diagonal rod material number
         diag_sec: Diagonal rod section number
-        sup_vert_load: Surface vertical load
+        sup_vert_load: Surface vertical load. Positiva sign upwards.
         trus_sep: Distance between trusses
         nod_dist_purlins: Distance between purlins in nodes
 
@@ -57,12 +59,15 @@ class LatticeBeam:
     # For loads
     sur_vert_load: float = 1.0  # Surface vertical load
     trus_sep: float = 5.0  # Distance between trusses
-    nod_dist_purlins: int = 2  # Distance between purlins in nodes
+    nod_dist_purlins: int = 1  # Distance between purlins in nodes
 
     # Luego del builder
     node_coords: Optional[List[Tuple]] = None
     conectivity: Optional[List[Tuple]] = None
     vloads: Optional[dict] = None
+
+    # For ploting
+    title: str = 'Lattice Beam'
 
     def lslope(self) -> float:
         '''Left slope of the floor.
@@ -136,11 +141,11 @@ class LatticeBeam:
         lvp = rot @ lv
         rvp = rot @ rv
 
-        A1 = np.array([0, self.hL])  # leftest node of the lattice beam
-        B1 = A1 + pL/2 * lv + self.dL * lvp
+        A1 = np.array([0, self.hL])  # leftest node coords of the lattice beam
+        B1 = A1 + pL/2 * lv + self.dL * lvp  # First node coords. at bottom
 
-        A2 = np.array([self.a + self.b, self.hr])  # rightest node
-        B2 = A2 - pr/2 * rv + self.dr * rvp
+        A2 = np.array([self.a + self.b, self.hr])  # rightest coords. node
+        B2 = A2 - pr/2 * rv + self.dr * rvp  # last node coords. at bottom
 
         # Left roof
         upper_left = [A1 + i*pL*lv for i in range(self.nL + 1)]
@@ -173,11 +178,11 @@ class LatticeBeam:
 
     def top_nodes(self) -> list:
         '''List of top node numbers'''
-        return [k for k in range(self.nknots()) if k % 2 == 0]
+        return [k + 1 for k in range(self.nknots()) if k % 2 == 0]
 
     def bottom_nodes(self) -> list:
         '''List of bottom node numbers'''
-        return [k for k in range(self.nknots()) if k % 2 != 0]
+        return [k + 1 for k in range(self.nknots()) if k % 2 != 0]
 
     def nodal_vloads(self) -> dict:
         '''Vertical nodal loads at the top nodes.
@@ -185,7 +190,7 @@ class LatticeBeam:
         Args:
             q: surface load
             sep: separation of trusses
-            each: every how many nodes a strap is located
+            each: every how many nodes a purlin is located
 
         Returns:
             Dictionary of type: {number_of_node: vertical_load, ...}
@@ -228,30 +233,30 @@ class LatticeBeam:
         verticals = vleft + vright
         verticals[-1] = verticals[-1] / 2
 
-        values = [(0, -v) for v in verticals]
+        values = [(0, v) for v in verticals]
 
         self.vloads = dict(zip(keys, values))
 
     def builder(self) -> List[Tuple]:
         '''Build the truss with vertical loads'''
-        print("Getting nodal coordinates...")
+        # print("Getting nodal coordinates...")
         self.coords()
         nnodes = self.nknots()
 
-        diags = [(i, i+1, self.diag_mat, self.diag_sec)
+        diags = [(i+1, i+2, self.diag_mat, self.diag_sec)
                  for i in range(nnodes - 1)]
-        long_sup = [(2*k, 2*k+2, self.long_mat, self.long_sec)
+        long_sup = [(2*k+1, 2*k+3, self.long_mat, self.long_sec)
                     for k in range(self.nL + self.nr)]
-        long_inf = [(2*k+1, 2*k+3, self.long_mat, self.long_sec)
+        long_inf = [(2*k+2, 2*k+4, self.long_mat, self.long_sec)
                     for k in range(self.nL + self.nr - 1)]
 
-        print('Building the connectivity table...')
+        # print('Building the connectivity table...')
         self.conectivity = long_sup + long_inf + diags
 
-        print('Computing nodal loads...')
+        # print('Computing nodal loads...')
         self.nodal_vloads()
 
-        print('Process completed successfully.')
+        # print('Process completed successfully.')
 
     def plot(self, node_numbering: bool = False):
         nodes = self.node_coords
@@ -263,15 +268,16 @@ class LatticeBeam:
         plt.scatter(X, Y)
 
         for b in conect:
-            x = (X[b[0]], X[b[1]])
-            y = (Y[b[0]], Y[b[1]])
+            x = (X[b[0]-1], X[b[1]-1])
+            y = (Y[b[0]-1], Y[b[1]-1])
             plt.plot(x, y, 'b')
 
         if node_numbering:
             for i in range(nn):
-                plt.annotate(i, (X[i], Y[i]))
+                plt.annotate(i + 1, (X[i], Y[i]))
 
         plt.axis('scaled')
+        plt.title(self.title)
         plt.grid()
         plt.show()
 
