@@ -2369,7 +2369,7 @@ class Portico(Estructura):
         barras = self.barras()
 
         # Ensamble de matrices globales
-        print("Ensamble de matrices globales...")
+        # print("Ensamble de matrices globales...")
         self.set_matrices_globales(nudos, barras)
 
         # noinspection SpellCheckingInspection
@@ -2377,17 +2377,17 @@ class Portico(Estructura):
             if self.cargas_nodales is None and self.cargas_barras is None:
                 print("Esta estructura no tiene cargas.")
             else:
-                print("Resolución del problema estático...")
+                # print("Resolución del problema estático...")
                 # Desplazamientos nodales estáticos
                 self.set_desplaz_gdl()  # Resuelve el problema estático
                 self.set_desplaz_nudos()  # Asigna desplaz. a los nudos
-                print("Listo, preguntá lo que quieras.")
+                # print("Listo, preguntá lo que quieras.")
 
         else:  # tipo_analisis = dinámico
             # Resolución del problema de autovalores
-            print("Resolución del problema de autovalores...")
+            # print("Resolución del problema de autovalores...")
             self.set_autos()
-            print("Listo.")
+            # print("Listo.")
 
 
 @dataclass
