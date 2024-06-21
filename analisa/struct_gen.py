@@ -51,10 +51,11 @@ class LatticeBeam:
     hr: float = 0  # height of the right support
 
     # For conectivity table
-    long_mat: int = 1  # longitudinal rod material number
-    long_sec: int = 1  # longitudinal rod section number
-    diag_mat: int = 1  # diagonal rod material number
-    diag_sec: int = 1  # diagonal rod section number
+    # Every count starts at zero
+    long_mat: int = 0  # longitudinal rod material number
+    long_sec: int = 0  # longitudinal rod section number
+    diag_mat: int = 0  # diagonal rod material number
+    diag_sec: int = 0  # diagonal rod section number
 
     # For loads
     sur_vert_load: float = 1.0  # Surface vertical load
@@ -178,11 +179,11 @@ class LatticeBeam:
 
     def top_nodes(self) -> list:
         '''List of top node numbers'''
-        return [k + 1 for k in range(self.nknots()) if k % 2 == 0]
+        return [k for k in range(self.nknots()) if k % 2 == 0]
 
     def bottom_nodes(self) -> list:
         '''List of bottom node numbers'''
-        return [k + 1 for k in range(self.nknots()) if k % 2 != 0]
+        return [k for k in range(self.nknots()) if k % 2 != 0]
 
     def nodal_vloads(self) -> dict:
         '''Vertical nodal loads at the top nodes.
@@ -243,11 +244,11 @@ class LatticeBeam:
         self.coords()
         nnodes = self.nknots()
 
-        diags = [(i+1, i+2, self.diag_mat, self.diag_sec)
+        diags = [(i, i+1, self.diag_mat, self.diag_sec)
                  for i in range(nnodes - 1)]
-        long_sup = [(2*k+1, 2*k+3, self.long_mat, self.long_sec)
+        long_sup = [(2*k, 2*k+2, self.long_mat, self.long_sec)
                     for k in range(self.nL + self.nr)]
-        long_inf = [(2*k+2, 2*k+4, self.long_mat, self.long_sec)
+        long_inf = [(2*k+1, 2*k+3, self.long_mat, self.long_sec)
                     for k in range(self.nL + self.nr - 1)]
 
         # print('Building the connectivity table...')
@@ -268,13 +269,13 @@ class LatticeBeam:
         plt.scatter(X, Y)
 
         for b in conect:
-            x = (X[b[0]-1], X[b[1]-1])
-            y = (Y[b[0]-1], Y[b[1]-1])
+            x = (X[b[0]], X[b[1]])
+            y = (Y[b[0]], Y[b[1]])
             plt.plot(x, y, 'b')
 
         if node_numbering:
             for i in range(nn):
-                plt.annotate(i + 1, (X[i], Y[i]))
+                plt.annotate(i, (X[i], Y[i]))
 
         plt.axis('scaled')
         plt.title(self.title)

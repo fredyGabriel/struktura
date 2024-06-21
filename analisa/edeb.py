@@ -82,7 +82,7 @@ class Nudo:
     """Nudo de estructura de barras
 
     :arg
-        num (int): número asignado;
+        num (int): número asignado al nudo, inicia en 0;
         coord (tuple[float]): Coordenadas de los nudos. Puede contener 1, 2 o 3
             valores según la dimensión considerada;
         tipo (int): Uno de los valores del siguiente diccionario:
@@ -101,7 +101,7 @@ class Nudo:
                 1: restringido en x
     """
     # Variables públicas
-    num: int  # Número asignado al nudo
+    num: int  # Número asignado al nudo, inicia en 0.
     coord: tuple[float]  # Coordenadas
     tipo: int  # Tipo de nudo
     restr: tuple[int] = field(init=False)  # Restricciones
@@ -113,7 +113,9 @@ class Nudo:
 
     def __post_init__(self):
         tipo = self.tipo
-        assert tipo in TIPO_ESTRUCTURA, "Verificar tipo de estructura"
+        assert tipo in TIPO_ESTRUCTURA, \
+            f"Invalid structure type: {tipo}.\
+            Must be one of {list(TIPO_ESTRUCTURA.keys())}"
 
         ngdl = NGDL_NUDO[TIPO_ESTRUCTURA[tipo]]
         self.restr = tuple([0] * ngdl)
@@ -233,7 +235,7 @@ class Nudo:
             plt.scatter(x, y, marker=mk, c=c1, **kwargs)
 
             if num:  # Agregar o no número asignado al nudo
-                plt.text(x, y, str(self.num + 1))
+                plt.text(x, y, str(self.num))
 
         elif self.dim == 3:
             [x, y, z] = self.coord
@@ -329,6 +331,7 @@ class Seccion:
 
 
 # Función global para instancias de Sección
+# TODO: probablemente es mejor que sea parte de la clase Seccion
 def perfil_aisc(nombre: str, aisc: pd.DataFrame) -> Seccion:
     """Instancia de Seccion para el perfil dado.
 
@@ -338,12 +341,16 @@ def perfil_aisc(nombre: str, aisc: pd.DataFrame) -> Seccion:
             "aisc-shapes-database-v15.0.xlsx"
 
     Ver:
-    # https://www.aisc.org/publications/steel-construction-manual-resources/#37584
+    https://www.aisc.org/publications/steel-construction-manual-resources/#37584
 
     Returns:
         Instancia de tipo Seccion
     """
-    idx = aisc.index[aisc['EDI_Std_Nomenclature'] == nombre][0]
+    try:
+        idx = aisc.index[aisc['EDI_Std_Nomenclature'] == nombre][0]
+    except IndexError:
+        raise ValueError(f"Profile '{nombre}' not found in AISC database.")
+
     A = aisc.loc[idx, 'A.1']*1e-3**2  # Área
     Iy = aisc.loc[idx, 'Iy.1']*1e-3**4*1e6  # Inercia en y
     Iz = aisc.loc[idx, 'Ix.1']*1e-3**4*1e6  # Inercia en z
@@ -361,6 +368,7 @@ def perfil_aisc(nombre: str, aisc: pd.DataFrame) -> Seccion:
 
 
 # Función global para instancias de Sección
+# TODO: probablemente es mejor que sea parte de la clase Seccion
 def perfil_gerdau(nombre: str, gerdau: pd.DataFrame) -> Seccion:
     """Instancia de Seccion para el perfil dado.
 
@@ -376,6 +384,11 @@ def perfil_gerdau(nombre: str, gerdau: pd.DataFrame) -> Seccion:
     :returns Instancia de tipo Seccion
     """
     idx = gerdau.index[gerdau['Designación'] == nombre][0]
+    try:
+        idx = gerdau.index[gerdau['Designación'] == nombre][0]
+    except IndexError:
+        raise ValueError(f"Profile '{nombre}' not found in GERDAU database.")
+
     A = gerdau.loc[idx, 'A']*1e-2**2  # Área
     Iy = gerdau.loc[idx, 'Iy']*1e-2**4  # Inercia en y
     Iz = gerdau.loc[idx, 'Ix']*1e-2**4  # Inercia en z
@@ -387,6 +400,11 @@ def perfil_gerdau(nombre: str, gerdau: pd.DataFrame) -> Seccion:
 #############################
 # Tratamiento de las barras #
 #############################
+
+class InvalidStructureType(Exception):
+    '''Custom exception class'''
+    pass
+
 
 @dataclass
 class Barra(ABC):
@@ -408,6 +426,11 @@ class Barra(ABC):
         seccion (Seccion): propiedades de la sección transversal
         versores (np.ndarray): Matriz cuyas columnas son los versores del
             sistema de coordenadas global adoptado.
+        roll (float): Ángulo en radianes medido en sentido horario cuando se
+            mira en la dirección negativa del eje x local, con el cual el
+            sistema xyz rota alrededor de x, tal que el xy quede vertical con
+            el eje y apuntando hacia arriba (i.e. en la dirección positiva del
+            eje Y global). Kassimali p477.
     """
 
     # Métodos abstractos:
@@ -425,6 +448,8 @@ class Barra(ABC):
     seccion: Seccion  # Propiedades geométricas de la sección
     versores: np.ndarray  # Matriz de versores adoptados
 
+    roll: float = 0.0  # Ángulo roll en radianes. Ver Kassimalli Cap8
+
     # Protegido
     # Carga distribuida en toda la barra, en coord. locales.
     # En gral.: np.array([qx, qy, qz]). Para vigas (float): q
@@ -432,19 +457,18 @@ class Barra(ABC):
 
     @abstractmethod
     def __post_init__(self):
-        # Para verificar el tipo correcto de la estructura entre otras cosas
-        pass
+        # Para verificar el tipo correcto de estructura entre otras cosas
+        assert self.nudo_inicial.dim == self.nudo_final.dim, \
+            "Initial and final nodes must have the same dimension."
 
     @property
-    def peso_propio(self, g: float = 9.80665):
+    def peso_propio(self):
         '''Peso propio de la barra
-
-        Args:
-            g: aceleración de la gravedad para unidades del S.I.
 
         Returns:
             peso propio de la barra.
         '''
+        g = 9.80665  # aceleración de la gravedad
         L = self.longitud
         A = self.seccion.area
         peso_esp = self.material.densidad * g
@@ -481,7 +505,9 @@ class Barra(ABC):
         return np.linalg.norm(ci - cf)
 
     def gdl(self) -> list:
-        """Grados de libertad de los nudos extremos de la barra."""
+        """Grados de libertad de los nudos extremos de la barra.
+        Inicia en 0.
+        """
         gdl_i = list(self.nudo_inicial.gdl())  # gdl del nudo inicial
         gdl_f = list(self.nudo_final.gdl())  # gdl del nudo final
         return gdl_i + gdl_f
@@ -494,7 +520,7 @@ class Barra(ABC):
     @property
     def ngdl_nudo(self):
         """Número de grados de libertad por nudo"""
-        return NGDL_NUDO[TE[self.tipo]]
+        return NGDL_NUDO[TIPO_ESTRUCTURA[self.tipo]]
 
     @property
     def ngdl_trans_nudo(self) -> int:
@@ -513,14 +539,73 @@ class Barra(ABC):
         """Matriz de masa en coordenadas locales."""
         pass
 
-    @abstractmethod
-    def carga_equiv_local(self) -> np.ndarray:
-        """Vector de _cargas nodales equivalentes en coordenadas locales."""
-        pass
+    def matriz_cos_dir(self) -> np.ndarray:
+        """Matriz de cosenos directores.
+
+        Las filas contienen los cosenos directores de los ejes locales
+        respecto a los globales.
+
+        En 1D se supone que el eje local x coincide con el global X
+
+        Basado en Aslam Kassimalli, Matrix Analysis of Structures. Cap. 8
+
+        Returns:
+            - 1D: Matriz de 1 x 1 (identidad)
+            - 2D: Matriz de 2 x 2
+            - 3D: Matriz de 3 x 3
+        """
+        dim = self.dim
+        roll = self.roll
+        versT = self.versores.T  # para facilitar
+
+        if dim == 1:
+            return np.array([1])
+
+        else:  # Para 2D o 3D
+            ci = np.array(self.nudo_inicial.coord)  # Coords. del nudo inicial
+            cf = np.array(self.nudo_final.coord)  # Coords. del nudo final
+            L = self.longitud
+            v = cf - ci  # Barra como vector
+
+            # Cosenos directores del eje local x
+            ix = np.array([np.dot(v, versT[i][:dim]) for i in range(dim)]) / L
+
+            if dim == 2:  # 2D
+                c, s = ix[0], ix[1]
+                return np.array([
+                    [c, s],
+                    [-s, c]
+                ])
+
+            else:  # 3D
+                # Versores j, k del sistema global
+                jota = versT[1]
+                ka = versT[2]
+
+                # Cosenos directores del eje local z
+                z = np.cross(ix, jota)  # Kassimalli (8.59)
+                nz = np.linalg.norm(z)  # Norma de z
+                if nz > 0.0:  # Si ix no es paralelo IY
+                    izb = z / nz  # Kassimalli (8.60)
+                    # Cosenos directores del eje local y
+                    iyb = np.cross(izb, ix)  # Kassimalli (8.61)
+                    iy = np.cos(roll)*iyb + np.sin(roll)*izb
+                    # Cosenos directores del eje local z
+                    iz = -np.sin(roll)*iyb + np.cos(roll)*izb
+                else:  # si ix es paralelo a IY
+                    iz = ka  # Kassimalli p477 2do párrafo.
+                    iy = np.cross(iz, ix)
+
+                return np.array([ix, iy, iz])  # Kassimalli (8.62)
 
     @abstractmethod
     def transf_coord(self) -> np.ndarray:
         """Matriz de transformación de coordenadas globales a locales."""
+        pass
+
+    @abstractmethod
+    def carga_equiv_local(self) -> np.ndarray:
+        """Vector de cargas nodales equivalentes en coordenadas locales."""
         pass
 
     @property
@@ -543,7 +628,7 @@ class Barra(ABC):
         return M
 
     def carga_equiv_global(self) -> np.ndarray:
-        """Vector de _cargas nodales equivalentes en coordenadas globales."""
+        """Vector de cargas nodales equivalentes en coordenadas globales."""
         Qf = self.carga_equiv_local()  # Cargas en coord. locales
         T = self.transf_coord()  # Matriz de transf. de coordenadas
         Ff = T.T @ Qf  # Cargas en coord. globales
@@ -616,18 +701,18 @@ class Barra(ABC):
                 plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
                 plt.gca().set_aspect('equal', adjustable='box')
                 if num:  # Agregar número asignado al nudo
-                    plt.text(Xm[0], Xm[1], str(self.num + 1))
+                    plt.text(Xm[0], Xm[1], str(self.num))
             else:
                 ax.plot(X, Y, color=color, linewidth=lw, **kwargs)
                 ax.set_aspect('equal', adjustable='box')
                 if num:  # Agregar número asignado al nudo
-                    ax.text(Xm[0], Xm[1], str(self.num + 1))
+                    ax.text(Xm[0], Xm[1], str(self.num))
 
         elif self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
             if num:
-                ax.text(Xm[0], X[1], X[2], str(self.num+1))
+                ax.text(Xm[0], X[1], X[2], str(self.num))
 
     def dibujar_deform(self, num=False, espesor_area=True, color='k', amp=1,
                        ax=None, **kwargs) -> None:
@@ -656,13 +741,13 @@ class Barra(ABC):
         if self.dim == 2:
             plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
             if num:  # Agregar número asignado al nudo
-                plt.text(Xm[0], Xm[1], str(self.num + 1))
+                plt.text(Xm[0], Xm[1], str(self.num))
 
         if self.dim == 3:
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
             if num:
-                ax.text(Xm[0], X[1], X[2], str(self.num+1))
+                ax.text(Xm[0], X[1], X[2], str(self.num))
 
 
 @dataclass
@@ -700,7 +785,9 @@ class BarraReticulado(Barra):
 
     # Sobre-escritura de la clase Barra
     def __post_init__(self):
-        assert self.tipo in RETICULADOS, 'Verificar tipo de estructura'
+        if self.tipo not in RETICULADOS:
+            raise InvalidStructureType(
+                f"Invalid structure type for truss element: {self.tipo}")
 
     # Sobre-escritura de la clase barra
     @property
@@ -745,67 +832,7 @@ class BarraReticulado(Barra):
         """
         return np.zeros(self.ngdl)
 
-    def matriz_cos_dir(self) -> np.ndarray:
-        """Matriz de cosenos directores.
-
-        Las filas contienen los cosenos directores de los ejes locales
-        respecto a los globales.
-
-        En 1D se supone que el eje local x coincide con el global X
-
-        Basado en Aslam Kassimalli, Matrix Analysis of Structures. Cap. 8
-
-        Returns:
-            - 1D: Matriz de 1 x 1 (identidad 1x1)
-            - 2D: Matriz de 2 x 2
-            - 3D: Matriz de 3 x 3
-        """
-        dim = self.dim
-        versT = self.versores.T  # Para tomar las columnas y no las filas
-
-        if dim == 1:
-            return np.array([1])
-
-        else:  # Para 2D o 3D
-            ci = np.array(self.nudo_inicial.coord)  # Coords. del nudo inicial
-            cf = np.array(self.nudo_final.coord)  # Coords. del nudo final
-            L = self.longitud
-            v = cf - ci  # Barra como vector
-
-            # Cosenos directores del eje local x
-            ix = np.array([np.dot(v, versT[i][:dim]) for i in range(dim)]) \
-                / L
-
-            if dim == 2:  # 2D
-                c, s = ix[0], ix[1]
-                return np.array([
-                    [c, s],
-                    [-s, c]
-                ])
-
-            else:  # 3D
-                # Adaptación para ángulo roll = 0
-                # Versores j, k del sistema global
-                jota = versT[1]
-                ka = versT[2]
-
-                # Cosenos directores del eje local z
-                z = np.cross(ix, jota)  # Kassimalli (8.59)
-                nz = np.linalg.norm(z)  # Norma de z
-                if nz > 0.0:  # Si ix no es paralelo IY
-                    izb = z / nz  # Kassimalli (8.60)
-                    # Cosenos directores del eje local y
-                    iyb = np.cross(izb, ix)  # Kassimalli (8.61)
-                    iy = iyb
-                    # Cosenos directores del eje local z
-                    iz = izb
-                else:  # si ix es paralelo a IY
-                    iz = ka  # Kassimalli p477 2do párrafo.
-                    iy = np.cross(iz, ix)
-
-                return np.array([ix, iy, iz])  # Kassimalli (8.62)
-
-    # Sobre-escritura de la clase Barra
+    # Sobre-escritura del método abstracto de la clase Barra
     def transf_coord(self) -> np.ndarray:
         """Matriz de transformación de coordenadas globales a locales.
 
@@ -898,19 +925,19 @@ class BarraReticulado(Barra):
                 ax.plot(X, Y, color=c, linewidth=lw, **kwargs)
                 ax.set_aspect('equal', adjustable='box')
                 if num:
-                    ax.text(Xm[0], Xm[1], str(self.num + 1))
+                    ax.text(Xm[0], Xm[1], str(self.num))
             else:
                 plt.plot(X, Y, color=c, linewidth=lw, **kwargs)
                 plt.gca().set_aspect('equal', adjustable='box')
                 if num:
-                    plt.text(Xm[0], Xm[1], str(self.num + 1))
+                    plt.text(Xm[0], Xm[1], str(self.num))
 
         elif self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=c, linewidth=lw, **kwargs)
             if num:
-                ax.text(Xm[0], X[1], X[2], str(self.num + 1))
+                ax.text(Xm[0], X[1], X[2], str(self.num))
 
     def dibujar_deform(self, num=False, espesor_area=1, amp=1,
                        colorear=False, ax=None, **kwargs) -> None:
@@ -950,19 +977,19 @@ class BarraReticulado(Barra):
                 ax.plot(X, Y, color=color, linewidth=lw, **kwargs)
                 ax.set_aspect('equal', adjustable='box')
                 if num:
-                    ax.text(Xm[0], Xm[1], str(self.num + 1))
+                    ax.text(Xm[0], Xm[1], str(self.num))
             else:
                 plt.plot(X, Y, color=color, linewidth=lw, **kwargs)
                 plt.gca().set_aspect('equal', adjustable='box')
                 if num:
-                    plt.text(Xm[0], Xm[1], str(self.num + 1))
+                    plt.text(Xm[0], Xm[1], str(self.num))
 
         if self.dim == 3:
             assert ax is not None, 'Debe proveer ax para el dibujo en 3D'
             Z = coord_separadas[2]
             ax.plot(X, Y, Z, color=color, linewidth=lw, **kwargs)
             if num:
-                ax.text(Xm[0], X[1], X[2], str(self.num+1))
+                ax.text(Xm[0], X[1], X[2], str(self.num))
 
 
 @dataclass
@@ -993,7 +1020,6 @@ class BarraPortico(Barra):
         cortante (bool): Consideración de la rigidez a cortante.
     """
 
-    roll: float = 0.0  # Ángulo roll en radianes
     cortante: bool = False  # Considerar el efecto de la cortante
 
     # Métodos sobreescritos:
@@ -1004,7 +1030,14 @@ class BarraPortico(Barra):
 
     # Sobreescrito
     def __post_init__(self):
-        assert self.tipo in {2, 3, 5, 6}, 'Verifica el tipo de barra'
+        if self.tipo not in {2, 3, 5, 6}:
+            raise InvalidStructureType(
+                f"Invalid structure type for frame element: {self.tipo}")
+
+        if self.cortante and self.seccion.area_cortante_y is None:
+            raise ValueError(
+                "Shear area (area_cortante_y) must be provided when \
+                considering shear stiffness.")
 
     @property  # Sobreescrito
     def masa_local(self) -> np.ndarray:
@@ -1155,66 +1188,6 @@ class BarraPortico(Barra):
             return self.rigidez_p2d()
         return self.rigidez_p3d()  # Pórtico espacial
 
-    def matriz_cos_dir(self) -> np.ndarray:
-        """Matriz de cosenos directores.
-
-        Las filas contienen los cosenos directores de los ejes locales
-        respecto a los globales.
-
-        En 1D se supone que el eje local x coincide con el global X
-
-        Basado en Aslam Kassimalli, Matrix Analysis of Structures. Cap. 8
-
-        Returns:
-            - 1D: Matriz de 1 x 1 (identidad)
-            - 2D: Matriz de 2 x 2
-            - 3D: Matriz de 3 x 3
-        """
-        dim = self.dim
-        roll = self.roll
-        versores = self.versores
-
-        if dim == 1:
-            return np.array([1])
-
-        else:  # Para 2D o 3D
-            ci = np.array(self.nudo_inicial.coord)  # Coords. del nudo inicial
-            cf = np.array(self.nudo_final.coord)  # Coords. del nudo final
-            L = self.longitud
-            v = cf - ci  # Barra como vector
-
-            # Cosenos directores del eje local x
-            ix = np.array([np.dot(v, versores[i][:dim]) for i in range(dim)]) \
-                / L
-
-            if dim == 2:  # 2D
-                c, s = ix[0], ix[1]
-                return np.array([
-                    [c, s],
-                    [-s, c]
-                ])
-
-            else:  # 3D
-                # Versores j, k del sistema global
-                jota = versores.T[1]
-                ka = versores.T[2]
-
-                # Cosenos directores del eje local z
-                z = np.cross(ix, jota)  # Kassimalli (8.59)
-                nz = np.linalg.norm(z)  # Norma de z
-                if nz > 0.0:  # Si ix no es paralelo IY
-                    izb = z / nz  # Kassimalli (8.60)
-                    # Cosenos directores del eje local y
-                    iyb = np.cross(izb, ix)  # Kassimalli (8.61)
-                    iy = np.cos(roll)*iyb + np.sin(roll)*izb
-                    # Cosenos directores del eje local z
-                    iz = -np.sin(roll)*iyb + np.cos(roll)*izb
-                else:  # si ix es paralelo a IY
-                    iz = ka  # Kassimalli p477 2do párrafo.
-                    iy = np.cross(iz, ix)
-
-                return np.array([ix, iy, iz])  # Kassimalli (8.62)
-
     def carga_equiv_local(self) -> np.ndarray:
         """Vector de cargas nodales equivalentes en coordenadas locales.
 
@@ -1317,6 +1290,12 @@ class BarraViga(BarraPortico):
     # Sobreescrito
     _carga: float = 0.0  # Carga distribuida en toda la barra
 
+    # Sobreescrito
+    def __post_init__(self):
+        if self.tipo not in {2}:
+            raise InvalidStructureType(
+                f"Invalid structure type for beam element: {self.tipo}")
+
     @property  # Sobreescrito
     def masa_local(self) -> np.ndarray:
         """Matriz de masa local de la viga.
@@ -1389,24 +1368,12 @@ class BarraViga(BarraPortico):
         Returns:
             Matriz 4x4 de tipo np.ndarray
         """
-        L = self.longitud
-        E = self.material.elast_long
-        Iz = self.seccion.inercia_z
-        G = self.material.elast_transv
-        Ac = self.seccion.area_cortante_y
 
-        if self.cortante:
-            assert Ac is not None, "Falta dato de área afectiva al corte"
-            f = 12*E*Iz/(G*Ac*L**2)
-        else:
-            f = 0
+        k1 = self.rigidez_p2d()  # Rigidez de pórtico plano
 
-        k = E*Iz/(L**3*(1 + f))*np.array([
-            [12, 6*L, -12, 6*L],
-            [6*L, (4 + f)*L**2, -6*L, (2 - f)*L**2],
-            [-12, -6*L, 12, -6*L],
-            [6*L, (2 - f)*L**2, -6*L, (4 + f)*L**2]
-        ])
+        # Elimina la 1ra y 3ra filas y columnas
+        k = np.delete(np.delete(k1, [0, 2], 0), [0, 2], 1)
+
         return k
 
     # Sobreescrito
@@ -1450,7 +1417,8 @@ class BarraViga(BarraPortico):
         return V1*x - M1 + q*x**2/2
 
 
-class BarraGrilla(BarraPortico):
+@dataclass
+class BarraGrilla(BarraViga):
     """Barra de grilla."""
     # Aún no implementado
     pass
@@ -1460,9 +1428,11 @@ class BarraGrilla(BarraPortico):
 class Estructura(ABC):
     """Estructura hecha de barras.
 
+    La enumeración de los nudos inicia en 0.
+
     :arg
         coords: Union[str, dict, list]: Coordenadas de los nudos.
-            - Formato dict: {1:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
+            - Formato dict: {0:C_1, 1:C_2, ...}, en donde las coordenadas C_i:
                 1D: X
                 2D: (X, Y)
                 3D: (X, Y, Z)
@@ -1474,7 +1444,7 @@ class Estructura(ABC):
             aunque no sea el tradicional: X: horizontal; Y: vertical;
             Z: saliente.
         restricciones (dict): Nudos restringidos y sus restricciones según se
-            define en la clase Nudo.
+            define en la clase Nudo. La enumeración de nudos inicia en 0.
         datos_barras (list): lista con datos de las barras para configurar los
             instancias de la clase Barra
         cargas_nodales (dict): cargas nodales
@@ -1516,40 +1486,46 @@ class Estructura(ABC):
 
     def preprocesamiento(self):
         """Preprocesamiento. Preparación de datos.
+
+        - Convierte los datos de nudos en un diccionario.
+        - Convierte los datos de barras en una lista.
+
         Configura atributos:
             datos_nudos: Diccionario de coordenadas nodales de la forma:
-                {1: (X, Y, Z), ...}
+                {0: (X, Y, Z), ...}
             datos_barras Lista de datos_barras con datos de barras de la forma:
                 [numero_nudo_inicial, numero_nudo_final, Material, Seccion]
         """
-        dn = self.datos_nudos
-        db = self.datos_barras
+        datos_nudos = self.datos_nudos
+        datos_barras = self.datos_barras
         materiales = self.materiales
         secciones = self.secciones
         # Nudos
         coordenadas = {}  # Inicialización para coordenadas nodales
-        if isinstance(dn, str):  # Si es un archivo csv
-            npd = pd.read_csv(dn)  # Nudos pandas dataframe
+        if isinstance(datos_nudos, str):  # Si es un archivo csv
+            npd = pd.read_csv(datos_nudos)  # Nudos pandas dataframe
             nnp = npd.to_numpy()  # Nudos en numpy ndarray
             for i, n in enumerate(nnp):
                 coordenadas[i] = tuple(n)
-        elif isinstance(dn, dict):  # Si es un diccionario
-            coordenadas = dict(sorted(dn.items()))
-        elif isinstance(dn, list):  # Si es una lista
-            for i, n in enumerate(dn):
+        elif isinstance(datos_nudos, dict):  # Si es un diccionario
+            coordenadas = dict(sorted(datos_nudos.items()))
+            if list(coordenadas.keys())[0] != 0:
+                raise ValueError("La enumeración de nudos debe iniciar en 0")
+        elif isinstance(datos_nudos, list):  # Si es una lista
+            for i, n in enumerate(datos_nudos):
                 coordenadas[i] = tuple(n)
         else:
             raise TypeError("Verifica datos de nudos.")
 
         # Barras
-        if isinstance(db, str):  # Si es un archivo csv
-            bpd = pd.read_csv(db)  # Barras pandas dataframe
+        if isinstance(datos_barras, str):  # Si es un archivo csv
+            bpd = pd.read_csv(datos_barras)  # Barras pandas dataframe
             bnp = bpd.to_numpy()  # Barras en numpy ndarray (vectorización)
-        elif isinstance(db, dict):  # Si es un diccionario
-            ordenado = dict(sorted(db.items()))
+        elif isinstance(datos_barras, dict):  # Si es un diccionario
+            ordenado = dict(sorted(datos_barras.items()))
             bnp = np.array(list(ordenado.values()))
-        elif isinstance(db, list):  # Si es una lista
-            bnp = np.array(db)
+        elif isinstance(datos_barras, list):  # Si es una lista
+            bnp = np.array(datos_barras)
         else:
             raise TypeError("Verifica datos de barras.")
 
@@ -1562,6 +1538,7 @@ class Estructura(ABC):
             secciones = [secciones]
 
         elementos = []
+        # Todo conteo inicia en 0.
         for i, b in enumerate(bnp):
             c = len(b)  # Cantidad de datos en cada barra
             if c == 2:  # Si solo se dan los datos de nudos se adopta el
@@ -1570,15 +1547,15 @@ class Estructura(ABC):
                 elementos.append([Ni, Nf, materiales[0], secciones[0]])
             elif c == 4:  # Si no se da el roll
                 Ni, Nf, m, s = tuple(b)
-                elementos.append([Ni, Nf, materiales[m-1], secciones[s-1]])
+                elementos.append([Ni, Nf, materiales[m], secciones[s]])
             elif c == 5:  # Si se da el dato de roll
                 Ni, Nf, m, s, r = tuple(b)
-                elementos.append([Ni, Nf, materiales[m-1], secciones[s-1], r])
+                elementos.append([Ni, Nf, materiales[m], secciones[s], r])
             else:
                 raise ValueError('Verifica datos de barras.')
 
         self.datos_nudos = coordenadas  # datos_nudos ahora es un dict ordenado
-        self._elementos = elementos  # datos_barras ahora es una lista
+        self._elementos = elementos  # guarda datos_barras en una lista
 
     @property
     def versores(self):
@@ -1676,12 +1653,12 @@ class Estructura(ABC):
 
         # Asignación de restricciones
         for rr in restricciones.keys():  # Recorre el diccionario de restr.
-            nudos[rr - 1].restr = restricciones[rr]
+            nudos[rr].restr = restricciones[rr]
 
         # Asignación de cargas nodales
         if cargas_nodales is not None:
             for qq in cargas_nodales.keys():  # Recorre diccionario de _cargas
-                nudos[qq - 1].set_cargas(np.array(cargas_nodales[qq]))
+                nudos[qq].set_cargas(np.array(cargas_nodales[qq]))
 
         # Enumeración de grados de libertad
         gdl_lista = [[0] * ngdl_nudo for _ in range(Nnudos)]  # Inicialización
@@ -1691,16 +1668,16 @@ class Estructura(ABC):
         for ii, nudo in enumerate(nudos):  # Recorre los nudos
             for jj, r in enumerate(nudo.restr):  # Recorre las restricciones
                 if r == 0:  # Si no hay restricción
-                    contador += 1
                     gdl_lista[ii][jj] = contador
+                    contador += 1
             nudo.set_gdl(tuple(gdl_lista[ii]))  # Se agrega dato al nudo
 
         # Asignación de los grados de restricción
         for ii, nudo in enumerate(nudos):  # Recorre los nudos nuevamente
             for jj, r in enumerate(nudo.restr):  # Recorre las restricciones
                 if r == 1:  # Si hay restricción
-                    contador += 1
                     gdl_lista[ii][jj] = contador
+                    contador += 1
             nudo.set_gdl(tuple(gdl_lista[ii]))  # Se agrega dato al nudo
 
         self._nudos = nudos  # Guarda la lista nudos
@@ -1740,7 +1717,7 @@ class Estructura(ABC):
         gdl = barra.gdl()  # Grados de liberad de la barra
         B = np.zeros((m, n))  # Inicialización
         for i in range(m):  # Por cada grado de libertad de la barra
-            B[i, gdl[i] - 1] = 1.0
+            B[i, gdl[i]] = 1.0
         return B
 
     def set_matrices_globales(self, nudos: list, barras: list) -> None:
@@ -1770,9 +1747,8 @@ class Estructura(ABC):
         # Ensamble del vector de fuerzas
         for nudo in nudos:  # Recorre todos los nudos
             g = np.array(nudo.gdl())  # Grados de libertad del nudo
-            indices = g - 1
             P = np.array(nudo.cargas())  # Lista con cargas en los nudos
-            FG[indices] = P
+            FG[g] = P
 
         # Guarda las matrices globales
         self._masa_global = MG
@@ -1840,8 +1816,8 @@ class Estructura(ABC):
             gdl = nudo.gdl()  # Grados de libertad del nudo
             dd = np.zeros(ngdl_nudo)  # Inicialización
             for i, g in enumerate(gdl):  # Recorre gdl's de cada nudo
-                if g <= ngdl:  # Menor porque se utiliza desplaz_gdl
-                    dd[i] = d[g - 1]  # Desplaz. del nudo
+                if g < ngdl:  # Menor porque se utiliza desplaz_gdl
+                    dd[i] = d[g]  # Desplaz. del nudo
             nudo.set_desplaz(dd)  # Asigna el desplazamiento al nudo
 
     def desplaz_gdl(self) -> np.ndarray:
@@ -2136,11 +2112,13 @@ class Estructura(ABC):
 class Reticulado(Estructura):
     """Estructura tipo Reticulado.
 
-    IMPORTANTE: No se considera el peso propio en los cálculos.
+    IMPORTANTE:
+    - No se considera el peso propio en los cálculos.
+    - Todos los conteos inician en 0.
 
     Args:
         coords: Union[str, dict, list]: Coordenadas de los nudos.
-            - Formato dict: {1:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
+            - Formato dict: {0:C_1, 1:C_2, ...}, en donde las coordenadas C_i:
                 1D: X
                 2D: (X, Y)
                 3D: (X, Y, Z)
@@ -2181,9 +2159,9 @@ class Reticulado(Estructura):
         versores = self.versores
 
         # Configuración de las barras
-        barras = [BarraReticulado(i, self.tipo, nudos[e[0] - 1],
-                                  nudos[e[1] - 1], e[2], e[3], versores) for
-                  i, e in enumerate(self._elementos)]
+        barras = [BarraReticulado(
+            i, self.tipo, nudos[e[0]], nudos[e[1]], e[2], e[3], versores
+            ) for i, e in enumerate(self._elementos)]
 
         self._barras = barras  # Guarda la lista barras
 
@@ -2272,7 +2250,7 @@ class Portico(Estructura):
 
     :param tipo (int): tipo de estructura según se define en TIPO_ESTRUCTURA
     :param coords (dict): Coordenadas de los nudos.
-        Tiene la forma: {1:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
+        Tiene la forma: {0:C_1, 2:C_2, ...}, en donde las coordenadas C_i:
             1D: X
             2D: (X, Y)
             3D: (X, Y, Z)
@@ -2562,8 +2540,8 @@ def mostrar_resultados(resultados):
 def main():
     # Prueba con Kassimali Example 6.7
     # Datos de los nudos
-    coords = {1: (0, 0), 2: (9, 0), 3: (0, 6), 4: (9, 6), 5: (0, 12)}
-    restricciones = {1: (1, 1, 1), 2: (1, 1, 1)}  # Apoyos
+    coords = {0: (0, 0), 1: (9, 0), 2: (0, 6), 3: (9, 6), 4: (0, 12)}
+    restricciones = {0: (1, 1, 1), 1: (1, 1, 1)}  # Apoyos
 
     # Materiales
     E = 30e9
@@ -2575,10 +2553,10 @@ def main():
     s = Seccion(area=A, inercia_z=inercia)
 
     # Conectividad
-    datos_barras = {1: (1, 3), 2: (2, 4), 3: (3, 5), 4: (3, 4), 5: (4, 5)}
+    datos_barras = {0: (1, 3), 1: (2, 4), 2: (3, 5), 3: (3, 4), 4: (4, 5)}
 
     # Cargas
-    cargas_nodales = {3: (80e3, 0, 0), 5: (40e3, 0, 0)}
+    cargas_nodales = {2: (80e3, 0, 0), 4: (40e3, 0, 0)}
 
     # Cargas en barras
     ang = np.arctan(6/9)
