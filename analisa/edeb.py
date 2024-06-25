@@ -103,7 +103,7 @@ class Nudo:
     # Variables públicas
     num: int  # Número asignado al nudo, inicia en 0.
     coord: tuple[float]  # Coordenadas
-    tipo: int  # Tipo de nudo
+    tipo: int  # Tipo de estructura para el nudo
     restr: tuple[int] = field(init=False)  # Restricciones
 
     # Variables protegidas
@@ -331,7 +331,7 @@ class Seccion:
 
 
 # Función global para instancias de Sección
-# TODO: probablemente es mejor que sea parte de la clase Seccion
+# TODO: ver introducir dentro de la clase Seccion o devolver también material
 def perfil_aisc(nombre: str, aisc: pd.DataFrame) -> Seccion:
     """Instancia de Seccion para el perfil dado.
 
@@ -419,6 +419,7 @@ class Barra(ABC):
         z: eje perpendicular a x e y
 
     :arg
+        num (int): Número asignado a la barra;
         tipo (int): Tipo de estructura según se define en TIPO_ESTRUCTURA
         nudo_inicial (Nudo): nudo inicial
         nudo_final (Nudo): nudo final
@@ -446,9 +447,12 @@ class Barra(ABC):
     nudo_final: Nudo  # Nudo final
     material: Material  # Propiedades del material
     seccion: Seccion  # Propiedades geométricas de la sección
-    versores: np.ndarray  # Matriz de versores adoptados
 
-    roll: float = 0.0  # Ángulo roll en radianes. Ver Kassimalli Cap8
+    # Matriz de versores del sistema de coordenadas global
+    versores: np.ndarray = field(default_factory=lambda: VERSORES)
+
+    # Ángulo roll en radianes. Ver Kassimalli Cap8
+    roll: float = 0.0
 
     # Protegido
     # Carga distribuida en toda la barra, en coord. locales.
@@ -765,6 +769,7 @@ class BarraReticulado(Barra):
         z: eje perpendicular a x e y
 
     :arg
+        num (int): Número asignado a la barra;
         tipo (int): Tipo de estructura según se define en TIPO_ESTRUCTURA
         nudo_inicial (Nudo): nudo inicial
         nudo_final (Nudo): nudo final
@@ -1011,7 +1016,7 @@ class BarraPortico(Barra):
         material (Material): datos del material
         seccion (Seccion): propiedades de la sección transversal
         versores (np.ndarray): Matriz cuyas columnas son los versores del
-            sistema de coordenadas global adoptado.
+            sistema de coordenadas global adoptado, usualmente identidad.
         roll (float): Ángulo en radianes medido en sentido horario cuando se
             mira en la dirección negativa del eje x local, con el cual el
             sistema xyz rota alrededor de x, tal que el xy quede vertical con
@@ -1418,10 +1423,76 @@ class BarraViga(BarraPortico):
 
 
 @dataclass
-class BarraGrilla(BarraViga):
-    """Barra de grilla."""
+class BarraGrilla(BarraPortico):
+    """Barra de grilla.
+
+    Adoptar el critero de que el nudo inicial tenga menor enumeración que el
+    nudo final.
+
+    Sistema de coordenadas locales (xyz):
+        x: eje de la barra.
+        y: ortogonal al plano de la grilla.
+        z: eje ortogonal a x e y
+
+    Sistema de coordenadas globales (XYZ):
+        - La grilla se desarrolla en el plano XZ.
+        - El eje y local es paralelo al Y global.
+
+    Params:
+        num (int): número asignado a la barra;
+        tipo (int): Tipo de estructura según se define en TIPO_ESTRUCTURA;
+        nudo_inicial (Nudo): nudo inicial;
+        nudo_final (Nudo): nudo final;
+        material (Material): datos del material;
+        seccion (Seccion): propiedades de la sección transversal;
+        versores (np.ndarray): Matriz cuyas columnas son los versores del
+            sistema de coordenadas global adoptado, usualmente identidad;
+        cortante (bool): Consideración de la rigidez a cortante.
+    """
     # Aún no implementado
-    pass
+
+    # Sobreescrito
+    def __post_init__(self):
+        if self.tipo not in {5}:
+            raise InvalidStructureType(
+                f"Invalid structure type for grid element: {self.tipo}")
+
+        if self.cortante and self.seccion.area_cortante_y is None:
+            raise ValueError(
+                "Shear area (area_cortante_y) must be provided when \
+                considering shear stiffness.")
+
+        # Verificación de que la barra esté en el plano XZ
+        if self.nudo_final.coord[1] != self.nudo_inicial.coord[1]:
+            raise ValueError("La barra debe estar en el plano XZ")
+
+    # Sobreescrito
+    # TODO: se necesitan inercias en todos los ejes.
+    @property
+    def masa_local(self) -> np.ndarray:
+        """Matriz de masa local de la barra de grilla.
+
+        Teoría de Euler-Bernoulli.
+
+        Si la inercia Iz es dada, se considerará la inercia rotacional. Si Iz
+        no es dada, se despreciará la inercia rotacional.
+
+        Returns:
+            Matriz 6x6
+        """
+        if self.seccion.inercia_y is None:
+            self.seccion.inercia_y = 1
+
+        matriz_portico = super().masa_local  # Matriz de barra pórtico 12x12
+
+        filas_a_aliminar = [0, 2, 4, 6, 8, 10]
+        columnas_a_eliminar = [0, 2, 4, 6, 8, 10]
+
+        # Matriz de 6x6
+        matriz_grilla = np.delete(matriz_portico, filas_a_aliminar, axis=0)
+        matriz_grilla = np.delete(matriz_portico, columnas_a_eliminar, axis=1)
+
+        return matriz_grilla
 
 
 @dataclass
