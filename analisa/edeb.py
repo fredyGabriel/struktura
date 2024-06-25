@@ -1544,6 +1544,7 @@ class Estructura(ABC):
     _nudos_dibujados: bool = False  # Si ya se dibujaron los nudos de la estr.
     _barras_dibujadas: bool = False  # Si ya se dibujaron las barras
     _peso_propio: Optional[float] = None  # Peso propio de la estructura
+    _tipo_analisis: str = field(init=False)  # Análisis estático o dinámico
 
     # No protegidas y con valores por defecto
     cargas_nodales: Optional[dict] = None  # Cargas en los nudos
@@ -1719,7 +1720,7 @@ class Estructura(ABC):
 
         coordenadas = list(coords.values())  # Lista ordenada de nudos
 
-        # Instanciación de nudos
+        # Instanciación de nudos    
         nudos = [Nudo(i, c, tipo) for i, c in enumerate(coordenadas)]
 
         # Asignación de restricciones
@@ -1760,11 +1761,17 @@ class Estructura(ABC):
 
     def nudos(self) -> list:
         """Lista de nudos de la estructura."""
-        return self._nudos
+        try:
+            return self._nudos
+        except AttributeError:
+            print("AttributeError: Pruebe ejecutando primero config_nudos().")
 
     def barras(self) -> list:
         """Lista de barras de la estructura."""
-        return self._barras
+        try:
+            return self._barras
+        except AttributeError:
+            print("AttributeError: Pruebe ejecutando primero config_barras().")
 
     def peso_propio(self):
         '''Peso propio de la estructura completa'''
@@ -1791,6 +1798,13 @@ class Estructura(ABC):
             B[i, gdl[i]] = 1.0
         return B
 
+    def tipo_analisis(self) -> str:
+        try:
+            return self._tipo_analisis
+        except AttributeError:
+            print("AttributeError: Pruebe ejecutando primero procesamiento().")
+
+    # TODO: separar los cálculos estáticos de los dinámicos
     def set_matrices_globales(self, nudos: list, barras: list) -> None:
         """Ensambla y guarda matriz de masa, rigidez y vector de fuerzas.
          En los grados de acción de la estructura.
@@ -1828,15 +1842,24 @@ class Estructura(ABC):
 
     def masa_global(self) -> np.ndarray:
         """Matriz de masa de la estructura global."""
-        return self._masa_global
+        try:
+            return self._masa_global
+        except AttributeError:
+            print("AttributeError: Verifique la ejecución de procesamiento()")
 
     def rigidez_global(self) -> np.ndarray:
         """Matriz de rigidez de la estructura global."""
-        return self._rigidez_global
+        try:
+            return self._rigidez_global
+        except AttributeError:
+            print("AttributeError: Verifique la ejecución de procesamiento()")
 
     def fuerza_global(self) -> np.ndarray:
         """Vector de fuerzas nodales de la estructura global."""
-        return self._fuerza_global
+        try:
+            return self._fuerza_global
+        except AttributeError:
+            print("AttributeError: Verifique la ejecución de procesamiento()")
 
     def masa_gdl(self) -> np.ndarray:
         """Matriz de masa en los grados de libertad de la estructura."""
@@ -2062,8 +2085,32 @@ class Estructura(ABC):
     ###############
 
     @abstractmethod
-    def procesamiento(self, tipo_analisis='estatico') -> None:
-        """Realiza todos los cálculos necesarios."""
+    def procesamiento(self, tipo_analisis='estatico', verbose=False) -> None:
+        """Realiza todos los cálculos necesarios.
+
+        Args:
+            tipo_analisis (str): análisis estático o dinámico;
+            verbose (bool): mensajes en el proceso de cálculo.
+
+        Returns:
+            None
+        """
+        self._tipo_analisis = tipo_analisis
+        pass
+
+    @abstractmethod
+    def mostrar_resultados(self, prefijos_SI=False):
+        """Muestra los resultados más importantes.
+
+        Args:
+            prefijos_SI (bool): si los datos utilizados tienen o no prefijos
+                                del Sistema Internacional de Unidades.
+                - True: datos con prefijos como KN, mm, MPa, etc.
+                - False: datos sin prefijos como N, m, Pa, etc.
+
+        Returns:
+            Imprime resultados.
+        """
         pass
 
     def dibujar_nudos(self, cuadro: tuple = None, num=False, ax=None,
@@ -2279,7 +2326,7 @@ class Reticulado(Estructura):
         return elongs
 
     # Sobreescrito
-    def procesamiento(self, tipo_analisis='estatico') -> None:
+    def procesamiento(self, tipo_analisis='estatico', verbose=False):
         """Procesamiento estático o dinámico.
 
         Realiza todos los cálculos necesarios.
@@ -2288,12 +2335,20 @@ class Reticulado(Estructura):
             tipo_analisis:
                 'estatico' para análisis estático
                 'dinamico' (o cualquier otra palabra) para análisis dinámico
+            devolver_resultados (bool): para análisis estático devuelve:
+                - Desplazamientos en los grados de libertad;
+                - Tensiones normales en las barras;
+                - Elongaciones de las barras;
+                - Reacciones en los grados de restricción.
+            verbose (bool): mensajes en el proceso de cálculo.
         """
+        self._tipo_analisis = tipo_analisis
         nudos = self.nudos()
         barras = self.barras()
 
         # Ensamble de matrices globales
-        # print("Ensamble de matrices globales...")
+        if verbose:
+            print("Ensamble de matrices globales...")
         self.set_matrices_globales(nudos, barras)
 
         # noinspection SpellCheckingInspection
@@ -2301,18 +2356,74 @@ class Reticulado(Estructura):
             if self.cargas_nodales is None:
                 raise ValueError("Esta estructura no tiene cargas.")
             else:
-                # print("Resolución del problema estático...")
+                if verbose:
+                    print("Resolución del problema estático...")
                 # Desplazamientos nodales estáticos
                 self.set_desplaz_gdl()  # Resuelve el problema estático
                 self.set_desplaz_nudos()  # Asigna desplaz. a los nudos
                 self.set_tensiones()  # Calcula y guarda las tensiones axiales
-                # print("Listo, preguntá lo que quieras.")
+                if verbose:
+                    print("Listo, preguntá lo que quieras.")
 
         else:  # tipo_analisis = dinámico
             # Resolución del problema de autovalores
-            # print("Resolución del problema de autovalores...")
+            if verbose:
+                print("Resolución del problema de autovalores...")
             self.set_autos()
-            # print("Listo.")
+            if verbose:
+                print("Listo.")
+
+    # Sobre-escrito
+    def mostrar_resultados(self, prefijos_SI=False):
+        """Muestra los resultados más importantes.
+
+        Args:
+            prefijos_SI (bool): si los datos utilizados tienen o no prefijos
+                                del Sistema Internacional de Unidades.
+                - True: datos con prefijos como KN, mm, MPa, etc., con unidades
+                    anglosajonas u otras unidades especiales.
+                - False: datos sin prefijos como N, m, Pa, etc.
+
+        Returns:
+            Imprime resultados.
+        """
+        if self.tipo_analisis() == 'estatico':
+            Xs = self.desplaz_gdl()
+            Ts = self.tensiones()
+            Es = self.elongaciones()
+            Rs = self.reacciones()
+
+            # TODO: chequear si haría falta redondeos.
+            if prefijos_SI:
+                print('RESPUESTA ESTÁTICA en unidades de los datos')
+                print('- Desplazamientos nodales:', Xs)
+                print('- Tensiones normales:', Ts)
+                print('- Elongaciones axiales:', Es)
+                print('- Reacciones:', Rs)
+                print()
+
+            else:
+                Ds = np.round(Xs * 1e3, 2)  # Desplazamientos en mm
+                Ts = np.round(Ts * 1e-6, 2)  # Tensiones en MPa
+                Es = np.round(Es * 1e3, 2)  # Elongaciones en mm
+                Rs = np.round(Rs * 1e-3, 2)  # Reacciones en kN
+                print('RESPUESTA ESTÁTICA')
+                print('- Desplazamientos nodales (mm):', Ds)
+                print('- Tensiones normales (MPa):', Ts)
+                print('- Elongaciones axiales (mm):', Es)
+                print('- Reacciones (kN):', Rs)
+                print()
+
+        else:
+            fs = self.freqs()
+            S = self.modos()
+            freqs = np.round(fs, 2)  # Frecuencias en Hz
+            modos = np.round(S, 2)  # Modos de vibración
+
+            print('RESPUESTA DINÁMICA')
+            print('- Frecuencias naturales (Hz):', freqs)
+            print('- Modos de vibración:', modos)
+            print()
 
 
 @dataclass
@@ -2580,17 +2691,17 @@ def norm_uno(modos):
 def mostrar_resultados(resultados):
     n_results = len(resultados)  # Número de resultados
     if n_results == 4:  # Respuesta estática
-        Xs, Fs, Ts, Rs = resultados  # Resultados de 'procesamiento' estático
-        Ds = np.round(Xs * 1000, 2)  # Desplazamientos en mm
-        Ns = np.round(Fs * 1e-3, 2)  # Fuerzas normales en kN
-        Ts = np.round(Ts * 1e-6, 2)  # Tensiones en MPa
-        Rs = np.round(Rs * 1e-3, 2)  # Reacciones en kN
+        Xs, Ts, Es, Rs = resultados  # Resultados de 'procesamiento' estático
+        Ds = np.round(Xs, 4)  # Desplazamientos
+        Ts = np.round(Ts, 0)  # Tensiones
+        Es = np.round(Es, 4)  # Elongaciones
+        Rs = np.round(Rs, 2)  # Reacciones
 
         print('RESPUESTA ESTÁTICA')
-        print('- Desplazamientos nodales (mm):', Ds)
-        print('- Fuerzas normales (kN):', Ns)
-        print('- Tensiones normales (MPa):', Ts)
-        print('- Reacciones (kN):', Rs)
+        print('- Desplazamientos en los grados de libertad:', Ds)
+        print('- Tensiones normales:', Ts)
+        print('- Elongaciones axiales:', Es)
+        print('- Reacciones:', Rs)
         print()
 
     elif n_results == 2:  # Respuesta dinámica
