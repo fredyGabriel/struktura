@@ -1720,7 +1720,7 @@ class Estructura(ABC):
 
         coordenadas = list(coords.values())  # Lista ordenada de nudos
 
-        # Instanciación de nudos    
+        # Instanciación de nudos
         nudos = [Nudo(i, c, tipo) for i, c in enumerate(coordenadas)]
 
         # Asignación de restricciones
@@ -2380,8 +2380,12 @@ class Reticulado(Estructura):
         Args:
             prefijos_SI (bool): si los datos utilizados tienen o no prefijos
                                 del Sistema Internacional de Unidades.
-                - True: datos con prefijos como KN, mm, MPa, etc., con unidades
-                    anglosajonas u otras unidades especiales.
+                - True: datos con prefijos en las unidades.
+                    Por ejemplo, fuerzas en kN y distancias en mm (por lo tanto
+                    las tensiones deben estar en kN/mm2).
+                    También para unidades anglosajonas u otras unidades
+                    especiales, siempre y cuando sean coherentes entre sí y no
+                    requieran de ningún factor de conversión.
                 - False: datos sin prefijos como N, m, Pa, etc.
 
         Returns:
@@ -2414,7 +2418,7 @@ class Reticulado(Estructura):
                 print('- Reacciones (kN):', Rs)
                 print()
 
-        else:
+        else:  # Análisis dinámico
             fs = self.freqs()
             S = self.modos()
             freqs = np.round(fs, 2)  # Frecuencias en Hz
@@ -2628,7 +2632,8 @@ class Viga(Portico):
     def diag_flector(self, num: int = 50):
         """Diagrama de momento flector de la viga.
 
-        :param num: número de puntos por barra para el diagrama
+        Args:
+            num: número de puntos por barra para el diagrama
         """
         Ltotal = sum(self.longitudes())
         abscisas = self.abscisas(num)
@@ -2686,37 +2691,6 @@ def norm_uno(modos):
         else:
             S[i] = v / min_abs[i]
     return S.T
-
-
-def mostrar_resultados(resultados):
-    n_results = len(resultados)  # Número de resultados
-    if n_results == 4:  # Respuesta estática
-        Xs, Ts, Es, Rs = resultados  # Resultados de 'procesamiento' estático
-        Ds = np.round(Xs, 4)  # Desplazamientos
-        Ts = np.round(Ts, 0)  # Tensiones
-        Es = np.round(Es, 4)  # Elongaciones
-        Rs = np.round(Rs, 2)  # Reacciones
-
-        print('RESPUESTA ESTÁTICA')
-        print('- Desplazamientos en los grados de libertad:', Ds)
-        print('- Tensiones normales:', Ts)
-        print('- Elongaciones axiales:', Es)
-        print('- Reacciones:', Rs)
-        print()
-
-    elif n_results == 2:  # Respuesta dinámica
-        fs, S = resultados  # Resultados de 'procesamiento' dinámico
-        freqs = np.round(fs, 2)  # Frecuencias en Hz
-        modos = np.round(S, 2)  # Modos de vibración
-
-        print('RESPUESTA DINÁMICA')
-        print('- Frecuencias naturales (Hz):', freqs)
-        print('- Modos de vibración:', modos)
-        print()
-
-    else:
-        print('Verificar la cantidad de resultados de -procesamiento-')
-        print()
 
 
 def main():
