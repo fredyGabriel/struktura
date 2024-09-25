@@ -2098,20 +2098,21 @@ class Estructura(ABC):
         self._tipo_analisis = tipo_analisis
         pass
 
-    @abstractmethod
-    def mostrar_resultados(self, prefijos_SI=False):
-        """Muestra los resultados más importantes.
+    # TODO: mostrar_resultados() está dando problemas en Portico
+    # @abstractmethod
+    # def mostrar_resultados(self, prefijos_SI=False):
+    #     """Muestra los resultados más importantes.
 
-        Args:
-            prefijos_SI (bool): si los datos utilizados tienen o no prefijos
-                                del Sistema Internacional de Unidades.
-                - True: datos con prefijos como KN, mm, MPa, etc.
-                - False: datos sin prefijos como N, m, Pa, etc.
+    #     Args:
+    #         prefijos_SI (bool): si los datos utilizados tienen o no prefijos
+    #                             del Sistema Internacional de Unidades.
+    #             - True: datos con prefijos como KN, mm, MPa, etc.
+    #             - False: datos sin prefijos como N, m, Pa, etc.
 
-        Returns:
-            Imprime resultados.
-        """
-        pass
+    #     Returns:
+    #         Imprime resultados.
+    #     """
+    #     pass
 
     def dibujar_nudos(self, cuadro: tuple = None, num=False, ax=None,
                       **kwargs):
@@ -2386,10 +2387,21 @@ class Reticulado(Estructura):
                     También para unidades anglosajonas u otras unidades
                     especiales, siempre y cuando sean coherentes entre sí y no
                     requieran de ningún factor de conversión.
-                - False: datos sin prefijos como N, m, Pa, etc.
+                - False: datos sin prefijos en unidades del Sistema
+                    Internacional como N, m, Pa, etc.
 
         Returns:
             Imprime resultados.
+
+            Para respuesta estática:
+                - Desplazamientos nodales;
+                - Tensiones normales;
+                - Elongaciones axiales;
+                - Reacciones.
+
+            Para respuesta dinámica:
+                - Frecuencias naturales;
+                - Modos de vibración.
         """
         if self.tipo_analisis() == 'estatico':
             Xs = self.desplaz_gdl()
@@ -2487,8 +2499,8 @@ class Portico(Estructura):
 
         # Instanciación de las barras
         for i, e in enumerate(elementos):
-            ni = e[0] - 1  # Índice del nudo inicial
-            nf = e[1] - 1  # Índice del nudo final
+            ni = e[0]  # Índice del nudo inicial
+            nf = e[1]  # Índice del nudo final
             if len(e) == 4:  # Si no se da el roll
                 bs.append(Bar(i, self.tipo, nudos[ni], nudos[nf], e[2], e[3],
                               versores, cortante=Q))
@@ -2504,7 +2516,7 @@ class Portico(Estructura):
         # TODO: Incorporar cargas en otras direcciones
         if cargas is not None:
             for nb in cargas.keys():  # Recorre diccionario de cargas
-                barra = bs[nb-1]  # Barra actual
+                barra = bs[nb]  # Barra actual
                 q = cargas[nb]  # Cargas en la barra
                 barra._carga = q  # Asignación de cargas distribuidas a barra
 
