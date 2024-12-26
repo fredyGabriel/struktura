@@ -1887,8 +1887,11 @@ class Estructura(ABC):
         """
         S = self.rigidez_gdl()
         P = self.fuerza_gdl()
-        d = np.linalg.inv(S) @ P
-        self._desplaz_gdl = d  # Guarda d
+        try:
+            d = np.linalg.solve(S, P)
+            self._desplaz_gdl = d  # Guarda d
+        except np.linalg.LinAlgError:
+            print("Error: La matriz de rigidez es singular.")
 
     def set_desplaz_nudos(self, desplaz_gdl=None) -> None:
         """Asignación de los desplazamientos en los nudos de la estructura.
@@ -2070,11 +2073,10 @@ class Estructura(ABC):
         m, n = Un.shape
         kdim = np.diag(self.omega2)  # Matriz de rigidez dinámica normalizada
         S = self.rigidez_gdl()  # Matriz de rigidez estática en los gdl's
-        invS = np.linalg.inv(S)  # Inversa de la matriz de rigidez
         Dn = np.zeros((m, n))
         for i in range(m):
             F = kdim @ Un[i]  # Fuerzas estáticas equivalentes
-            Dn[i] = invS @ F  # Desplazamientos estáticos equivalentes
+            Dn[i] = np.linalg.solve(S, F)  # Desplazamientos estáticos equiv.
 
         Xequiv = Dn.sum(axis=0)  # Suma la contribución de cada modo
 
